@@ -45,6 +45,18 @@
 			path = OrtsbildUITests;
 			sourceTree = "<group>";
 		};
+		5D9D30303090A3E5002E2B02 /* backend */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			name = backend;
+			path = ../backend;
+			sourceTree = "<group>";
+		};
+		5D9D30333090A3E9002E2B02 /* docs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			name = docs;
+			path = ../docs;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +90,8 @@
 				5D7ED333308F97A700D31E50 /* Ortsbild */,
 				5D7ED341308F97A800D31E50 /* OrtsbildTests */,
 				5D7ED34B308F97A800D31E50 /* OrtsbildUITests */,
+				5D9D30333090A3E9002E2B02 /* docs */,
+				5D9D30303090A3E5002E2B02 /* backend */,
 				5D7ED332308F97A700D31E50 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -395,11 +409,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Ortsbild/Ortsbild.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LD77GPFHU4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Ortsbild nutzt die Kamera, um ein Foto des Mangels aufzunehmen, den du melden möchtest.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -427,11 +443,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Ortsbild/Ortsbild.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LD77GPFHU4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Ortsbild nutzt die Kamera, um ein Foto des Mangels aufzunehmen, den du melden möchtest.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
