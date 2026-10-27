@@ -19,7 +19,7 @@ struct ReportDraft {
     // TODO: Show user_addendum (user additions) separately from the factual part
 }
 
-/// Actions of the approval pause (see handoff: approve, revise, wrong authority, close).
+/// Actions of the approval pause (see docs/documentation.md: approve, revise, wrong authority, close).
 enum DraftAction {
     case approve
     case revise
@@ -27,7 +27,7 @@ enum DraftAction {
     case close
 }
 
-/// Content types of a chat message. They mirror the escalation levels from the handoff.
+/// Content types of a chat message. They mirror the escalation levels from docs/documentation.md.
 enum ChatContent {
     case text(String)
     case photo(UIImage, caption: String?)

@@ -5,7 +5,7 @@
 
 import UIKit
 
-/// Scripted responses that make the flow from the handoff visible.
+/// Scripted responses that make the flow from docs/documentation.md visible.
 struct MockReportService: ReportService {
 
     func respond(photo: UIImage?, text: String?) -> AsyncStream<ChatContent> {
