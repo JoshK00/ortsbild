@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 
 from models.incoming_report import IncomingReport
+from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
+from privacy.photo_store import InMemoryPhotoStore
+from tests.image_helpers import make_jpeg
 
 
 def make_report(**overrides) -> IncomingReport:
@@ -21,14 +24,16 @@ def make_report(**overrides) -> IncomingReport:
 
 def test_graph_reads_the_report():
     """The report goes into the graph and the first step describes it."""
-    graph = build_privacy_graph()
+    store = InMemoryPhotoStore()
+    store.save("raw/7c9e/p1.jpg", make_jpeg(), "image/jpeg")
+    graph = build_privacy_graph([PatternDetector()], store)
     result = graph.invoke({"report": make_report()})
     assert result["summary"] == "report 7c9e from app: 1 photo(s), text: yes"
 
 
 def test_graph_handles_email_report_without_photo_and_text():
     """An email report without photo and text is read just as well."""
-    graph = build_privacy_graph()
+    graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore())
     report = make_report(
         source={"type": "email", "connector": "imap-inbox", "raw_ref": "raw/7c9e/m.eml"},
         photos=[],

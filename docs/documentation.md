@@ -154,6 +154,30 @@ The privacy stage runs **before** all other agents, including classification. Ra
 - The result is usually pseudonymization, not full anonymization in the GDPR sense.
 - Whether small detectors work well enough on photos of potholes, graffiti and litter is untested.
 
+**Text detector: why GLiNER2-PII (decision 2026-10-28, open to revision after an evaluation)**
+
+Model `fastino/gliner2-privacy-filter-PII-multi` (GLiNER2-PII, May 2026), Python package `gliner2`. The first candidate was `urchade/gliner_multi_pii-v1` (April 2024), which is outdated.
+
+Why this one:
+- Small (about 205M parameters), runs on the CPU inside our own backend, no external call. It fits the decision against self-hosted large models.
+- German is one of 7 supported languages. It knows 42 entity types, including person, street address, email, phone number, license number and IBAN, so one model covers most of the text step.
+- Labels are passed at inference time (zero-shot), new kinds need no retraining.
+- License Apache 2.0.
+- In the vendor's paper it has the best recall of the compared GLiNER detectors (average 0.718) and the best overall F1 on the SPY benchmark. The old candidate has higher precision but the lowest recall. For us a missed name is worse than a redacted word too many.
+
+Caveats, to be kept in mind:
+- The benchmark comes from the vendor itself, is mostly English (legal and medical texts) and all scores are low. It says little about German reports.
+- Low precision (0.35 to 0.37): it over-predicts names, sometimes labeling common nouns, organizations or product names as persons. Over-redaction is acceptable for us, but it can blur useful words.
+- Trained on synthetic data without human review.
+- There is no label for organizations. License plates are covered by `license_number`, not verified for German plates.
+- Cost: installing `gliner2` needs `torch` and `transformers` (virtual environment about 1 GB). The first load downloads the model (took about 3.7 minutes here), later calls are fast (about 0.07 s for one report text on the CPU).
+
+Smoke test (one German example, not an evaluation): person, street address, email, phone number and license plate were all found with confidence 0.88 or higher.
+
+TODO: Build a small evaluation set of German reports (email with names, defect address, plates, phone in the signature) and compare against `urchade/gliner_multi_pii-v1` and a plain pattern baseline.
+
+**A detector alone is not the safeguard.** No detector anonymizes reliably, a small model even less. Therefore the privacy layer never relies on one model: patterns with checksums for structured data (email, phone, IBAN) run in addition, low confidence leads to blocking (fail closed), over-redaction is preferred, the redaction log makes every run auditable, and the detector sits behind an interface so it can be replaced. What remains is a residual risk that must be covered legally (pseudonymization, DPAs with the hoster and model providers, EU hosting, data protection sign-off, see section 6).
+
 ---
 
 ## 6. Legal assessment (state of the discussion, not legal advice)

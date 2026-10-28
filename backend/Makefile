@@ -1,9 +1,9 @@
-.PHONY: install test test-verbose
+.PHONY: install test test-verbose test-integration graph
 
 # Create the virtual environment and install the dependencies
 install:
 	python3 -m venv .venv
-	.venv/bin/pip install pydantic pytest langgraph
+	.venv/bin/pip install pydantic pytest langgraph gliner2 torch transformers huggingface_hub supabase python-dotenv pillow
 
 # Run all tests, or only one file: make test T=incoming_report
 test:
@@ -20,3 +20,11 @@ ifdef T
 else
 	.venv/bin/pytest -v
 endif
+
+# Print the privacy graph as a Mermaid diagram (generated from the code)
+graph:
+	PYTHONPATH=. .venv/bin/python scripts/draw_graph.py
+
+# Tests against the real Supabase project (needs backend/.env)
+test-integration:
+	.venv/bin/pytest -v -m integration
