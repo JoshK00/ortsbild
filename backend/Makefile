@@ -3,7 +3,7 @@
 # Create the virtual environment and install the dependencies
 install:
 	python3 -m venv .venv
-	.venv/bin/pip install pydantic pytest langgraph gliner2 torch transformers huggingface_hub supabase python-dotenv pillow
+	.venv/bin/pip install pydantic pytest langgraph gliner2 torch transformers huggingface_hub supabase python-dotenv pillow pillow-heif
 
 # Run all tests, or only one file: make test T=incoming_report
 test:

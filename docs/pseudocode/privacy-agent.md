@@ -4,10 +4,15 @@ Takes an `IncomingReport` (see [incoming-report.md](incoming-report.md)) and ret
 
 ## 1. Steps
 
+Steps only run when their input exists: the photo steps (a, c) only for reports with photos,
+the text step (b) only for reports with text. After every step a router in the graph picks the
+next step that applies, so no detector runs on a report without photos or without text.
+
 ```
 a. strip_metadata
      for each photo: remove EXIF (GPS, device, timestamps)
      the location already comes from the gateway, so EXIF is simply dropped
+     HEIC/HEIF (iPhone default) is converted to JPEG, so later steps see one format
 
 b. sanitize_text   (if text)
      find: emails, phone numbers, IBAN, license plates      -> patterns + checksums

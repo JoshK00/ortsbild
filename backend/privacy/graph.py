@@ -1,4 +1,6 @@
 import operator
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -75,9 +77,41 @@ def make_sanitize_text_node(detectors: list[TextDetector]):
     return sanitize_text_node
 
 
-def continue_or_stop(state: PrivacyState) -> str:
-    """Decide the next arrow: go on, or stop because a step blocked the report."""
-    return "blocked" if state.get("status") == "blocked_privacy" else "continue"
+def has_photos(state: PrivacyState) -> bool:
+    """True if the report carries at least one photo."""
+    return bool(state["report"].photos)
+
+
+def has_text(state: PrivacyState) -> bool:
+    """True if the report carries free text."""
+    return bool(state["report"].text)
+
+
+@dataclass(frozen=True)
+class Step:
+    """One step of the pipeline: its name, the node, and when it has to run at all."""
+
+    name: str
+    node: Callable[[PrivacyState], dict]
+    applies: Callable[[PrivacyState], bool]
+
+
+def make_router(steps: list[Step], index: int):
+    """Build the decision after step `index`: the next step that applies, or the end.
+
+    A blocked report always ends. A step whose input is missing is skipped, so no
+    detector runs on a report without photos or without text.
+    """
+
+    def router(state: PrivacyState) -> str:
+        if state.get("status") == "blocked_privacy":
+            return END
+        for step in steps[index + 1 :]:
+            if step.applies(state):
+                return step.name
+        return END
+
+    return router
 
 
 def default_detectors() -> list[TextDetector]:
@@ -99,18 +133,24 @@ def build_privacy_graph(
     if photo_store is None:
         photo_store = supabase_store_from_env()
 
+    # The order of this list is the order of the pipeline.
+    # TODO: Add sanitize_photos (applies: has_photos), pseudonymize_user and assemble (always apply).
+    steps = [
+        Step("strip_metadata", make_strip_metadata_node(photo_store), has_photos),
+        Step("sanitize_text", make_sanitize_text_node(detectors), has_text),
+    ]
+
     graph = StateGraph(PrivacyState)
     graph.add_node("inspect_report", inspect_report)
-    graph.add_node("strip_metadata", make_strip_metadata_node(photo_store))
-    graph.add_node("sanitize_text", make_sanitize_text_node(detectors))
+    for step in steps:
+        graph.add_node(step.name, step.node)
 
+    # After every node a router picks the next step that applies, or stops
+    # (blocked report, nothing left to do).
+    sources = ["inspect_report"] + [step.name for step in steps]
     graph.add_edge(START, "inspect_report")
-    graph.add_edge("inspect_report", "strip_metadata")
-    # Fail closed: a blocked report stops here instead of reaching the next step
-    graph.add_conditional_edges(
-        "strip_metadata", continue_or_stop, {"continue": "sanitize_text", "blocked": END}
-    )
-    graph.add_edge("sanitize_text", END)
-    # TODO: Add sanitize_photos, pseudonymize_user and assemble.
-    # TODO: Add the blocked branch after sanitize_text too, once more steps follow it.
+    for position, source in enumerate(sources):
+        targets = {step.name: step.name for step in steps[position:]}
+        targets[END] = END
+        graph.add_conditional_edges(source, make_router(steps, position - 1), targets)
     return graph.compile()

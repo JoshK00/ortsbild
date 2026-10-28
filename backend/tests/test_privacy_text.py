@@ -139,11 +139,12 @@ def test_graph_sanitizes_the_text_and_fills_the_log():
 
 
 def test_graph_without_text_passes_without_entries():
-    """A report without text is fine, there is just nothing to redact."""
+    """A report without text is fine: the text step is skipped, nothing is redacted."""
     graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore())
     result = graph.invoke({"report": make_report(None)})
-    assert result["text"] is None
+    assert "text" not in result
     assert result.get("redactions", []) == []
+    assert result["status"] == "running"
 
 
 def test_graph_fails_closed_when_a_detector_breaks():
