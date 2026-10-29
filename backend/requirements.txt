@@ -15,3 +15,4 @@ uvicorn
 boto3
 psycopg[binary]
 python-dotenv
+python-multipart

@@ -253,6 +253,7 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - Move to IONOS: the code for S3 storage and PostgreSQL is written and tested with fakes (`backend/sql/postgres/`, `docker-compose.yml`). Still to do: start Docker Desktop and test the local stack (`docker compose up --build`, `make test-integration`), then remove the Supabase code and its tests (`backend/sql/supabase/`), create the IONOS resources and deploy. Run the backend with its own database user instead of the owner.
 - Build the operator view of blocked reports (the store has `list_blocked`, an endpoint and a way to retry or discard are missing).
 - Send the log to a safe central place with alerts (today terminal and `backend/logs/` only).
+- Real authentication of the app and a limit of requests per device instead of one shared API key (the key inside the app can be extracted).
 - End-to-end test on a real iPhone: API (FastAPI), app connection, location permission (section 10).
 - Licenses (section 12): let the app send JPEG instead of HEIC, replace MinIO, ask for a legal view on the training data of YuNet and GLiNER2-PII before real operation, include notices on any delivery.
 - Example municipality, check the name (App Store, domain), authority dashboard.
@@ -265,7 +266,7 @@ Goal: take a photo and write a text on a real iPhone, send both through the priv
 
 The app already has the `ReportService` protocol with `MockReportService`, so the app gets a second implementation (`BackendReportService`) and the UI stays.
 
-Backend: the privacy layer is complete (faces, optional text in images, pseudonym, assemble), next a FastAPI endpoint `POST /reports` (photo, text, location, device id) that stores the photo in the bucket `raw`, runs the graph and returns the `SanitizedReport` with the clean photo.
+Backend: the privacy layer is complete (faces, optional text in images, pseudonym, assemble) and the endpoint `POST /reports` exists (done, see the decision log) (photo, text, location, device id) that stores the photo in the bucket `raw`, runs the graph and returns the `SanitizedReport` with the clean photo.
 App: ask for the location (mandatory in `IncomingReport`, needs `NSLocationWhenInUseUsageDescription`), `BackendReportService`, an exception for plain HTTP in the local network (App Transport Security) for the test.
 Reachability: iPhone and Mac in the same Wi-Fi, no tunnel for real photos (the image would pass a third party).
 Test data: own photos only, no recognizable third parties.
@@ -305,6 +306,8 @@ Test data: own photos only, no recognizable third parties.
 | 2026-10-29 | The server (IONOS Cube, Ubuntu 24.04) is set up with `deploy/bootstrap-ubuntu.sh`: update, automatic security updates, user `deploy` with the SSH key only, no root or password login, Docker from the official repository, 2 GB swap, firewall (ufw) and fail2ban. Network: the IONOS security group allows inbound TCP 22, 80 and 443 only | Minimal rights, two firewall layers, no password to guess. The default security group of IONOS blocks all inbound traffic until rules are added. |
 | 2026-10-29 | Production stack: Caddy (HTTPS, automatic certificate), backend and PostgreSQL as containers (`deploy/docker-compose.prod.yml`). Neither the backend nor the database publishes a port. Deploy by `deploy/deploy.sh` (rsync from the Mac, the image is built on the server because the Mac is ARM and the Cube x86). `.env.prod` with the secrets lives only on the server, a new `PSEUDONYM_SECRET` is created for it | Only Caddy is reachable from outside. No registry and no git credentials on the server needed. Secrets never travel with the code. |
 | 2026-10-29 | IONOS Object Storage for the photos: contract-owned buckets in Frankfurt (`eu-central-4`, endpoint `https://s3.eu-central-4.ionoscloud.com`) or Berlin (`eu-central-3`), signature version 4, bucket names unique across IONOS | The S3 code works with any S3 compatible provider, only the endpoint, region and keys differ. |
+| 2026-10-29 | `POST /reports` (multipart: lat, lon, device_id, optional text and photo) is the entry of the app and `GET /reports/{id}/photos/{photo}` returns the sanitized photo. The photo type is detected from the content (JPEG, PNG, HEIC), never from the header the client claims. At most 15 MB, 5000 characters. The answer is the sanitized report or `blocked` without any reason | The gateway rules (image only, location mandatory) are enforced at the border. A blocked report must not tell the client what was found. |
+| 2026-10-29 | Every report endpoint needs the header `X-API-Key`. A server without a configured `API_KEY` rejects everything (503). `/health` stays open | The server is public on the internet, without a key anyone could fill our storage. One shared key is not real authentication, it is only protection against drive-by use (TODO in the code). |
 | 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |
 
 ---
