@@ -228,7 +228,7 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - Clarify order and scope of agents 3 to 7.
 - Categories: do the six MVP categories stay or become configurable per municipality?
 - Choose the model provider for agents after the privacy stage.
-- Choose hoster and Supabase region check (done for the dev project: EU), conclude DPAs.
+- Choose the hoster, confirm that the Supabase project runs in an EU region (not yet confirmed for the dev project) and conclude DPAs.
 - Have the legal assessment signed off by an expert (section 6), including pseudonyms as personal data and the license plate question (decision log, 2026-10-29).
 - Build `sanitize_photos` (faces first), choose the face detector (candidate: OpenCV YuNet). License plates in photos only later and optional.
 - Test the text detector and the image detectors on realistic German examples (evaluation set).
