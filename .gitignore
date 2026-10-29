@@ -10,3 +10,4 @@ __pycache__/
 .pytest_cache/
 .env
 backend/logs/
+backend/THIRD_PARTY_NOTICES.md

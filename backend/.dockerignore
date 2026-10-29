@@ -5,3 +5,7 @@ __pycache__
 .pytest_cache
 tests
 *.md
+# the notices travel with the image
+!MODEL_NOTICES.md
+!THIRD_PARTY_NOTICES.md
+!assets/README.md
