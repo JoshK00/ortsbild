@@ -254,6 +254,7 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - Build the operator view of blocked reports (the store has `list_blocked`, an endpoint and a way to retry or discard are missing).
 - Send the log to a safe central place with alerts (today terminal and `backend/logs/` only).
 - End-to-end test on a real iPhone: API (FastAPI), app connection, location permission (section 10).
+- Licenses (section 12): let the app send JPEG instead of HEIC, replace MinIO, ask for a legal view on the training data of YuNet and GLiNER2-PII before real operation, include notices on any delivery.
 - Example municipality, check the name (App Store, domain), authority dashboard.
 
 ---
@@ -302,3 +303,39 @@ Test data: own photos only, no recognizable third parties.
 | 2026-10-29 | `GET /health` (FastAPI): 200 if all models answer and Supabase (buckets, both tables) is reachable, 503 with the failing parts otherwise. The same checks run at startup, the app starts even if one fails | A missing model or table is noticed before the first real report. Only error types and our own safe messages are shown, never secrets. |
 | 2026-10-29 | Move storage, database and backend hosting to IONOS (Germany) for the MVP, PostgreSQL first as a container next to the backend | See section 7: self-service access, cost, PostGIS and S3 available, no US parent company. Supabase is dropped after the move. |
 | 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |
+
+---
+
+## 12. License review (2026-10-29, not legal advice)
+
+Checked from the model cards and repositories, the license files inside the installed packages and the wheels of the Linux build (the platform of the Docker image). Everything marked "to verify" comes from a secondary source or from general knowledge.
+
+**Hosting is not distributing.** Most open-source duties (license texts, source offers for GPL/LGPL code) start when software is handed to someone. Running it as a service on our own server is not that, the exception is the AGPL. The iOS app contains none of the libraries below (no Swift packages in the project). It becomes relevant if the backend is ever delivered to a third party, for example an authority that hosts it itself.
+
+### Models
+
+| Model | License | What to know | Risk |
+|---|---|---|---|
+| **GLiNER2-PII** (`fastino/gliner2-privacy-filter-PII-multi`) | Apache 2.0 (model card) | Based on GLiNER2 (code Apache 2.0, the license of its base weights is not stated on the repo page) with a DeBERTa-v3 / mDeBERTa-v3 encoder (MIT according to our knowledge, to verify). Trained on 4,910 synthetic texts generated with GPT-5.4, without human review. The card does not address the terms of use of the generating model. | low to medium (provenance of the training data) |
+| **YuNet** (OpenCV Zoo, `face_detection_yunet_2023mar.onnx`) | MIT | Comes from the project libfacedetection.train. The model README does not name the training data. The performance is measured on WIDER FACE. The WIDER FACE dataset is listed as CC BY-NC-ND 4.0 on its Hugging Face card (other sources: academic use only). Whether weights trained on it are a derivative is an unsettled legal question. MIT requires that the copyright notice is kept. | medium (training data), fine for the MVP |
+| **PP-OCRv6 small (detection and recognition)** and the text angle classifier `ch_ppocr_mobile_v2.0_cls` via RapidOCR | Apache 2.0 | The license file `MODEL_LICENSES.md` inside the package states Apache 2.0, copyright of the weights with Baidu and the PaddleOCR rights holders, no non-commercial restriction found. | low |
+
+### Libraries and binaries
+
+| Part | License | What to know | Risk |
+|---|---|---|---|
+| **pillow-heif** (HEIC) | code BSD-3, but the **binary wheel is GPL-2.0 as a whole** | The Linux wheel bundles `libx265` (GPL-2.0), `libheif` and `libde265` (LGPL-3.0). We only decode, but the library is in the image. HEIC is HEVC, which has patent pools (to verify). | **highest**, only if we hand the image to others |
+| **OpenCV** (`opencv-python-headless`) | Apache 2.0 | The Linux wheel bundles FFmpeg parts (`libavcodec`, `libswscale`, `libswresample`, LGPL) and no x264/x265. The macOS wheel on the dev machine also bundles GPL codecs, it is never used for a delivery. | low |
+| **psycopg** (PostgreSQL driver) | LGPL-3.0 | Used unmodified as a library, fine. License text must be kept on distribution. | low |
+| certifi, orjson, tqdm | MPL-2.0 | File-level copyleft, unmodified use is fine. | low |
+| torch, transformers, langgraph, pydantic, fastapi, onnxruntime, boto3, huggingface_hub and about 100 more | MIT, BSD, Apache 2.0 | Permissive. License and notice texts have to be included on distribution (`make notices`). | low |
+| **MinIO** (local S3 in `docker-compose.yml`) | AGPL-3.0 | The community edition is **archived** since April 2026, no patches. Only used on the dev machine, bound to 127.0.0.1, unmodified. | low for license, medium for security (dev only) |
+| Docker base images (python, postgres) | various, standard | Debian packages (GPL/LGPL), PostgreSQL license. Normal for any container. | low |
+
+### What we have to do
+
+1. **Now, cheap:** keep the licenses and sources next to the model files (`backend/assets/README.md`), cite the YuNet paper, generate the notices with `make notices` before any delivery.
+2. **HEIC (before TestFlight):** let the iOS app send JPEG (the app can convert before the upload). Then HEIC is only needed for email attachments. Keep pillow-heif for now because we host only. Before any delivery to a third party: remove `libx265` (build libheif without it, or drop HEIC at the connector).
+3. **MinIO:** replace it in `docker-compose.yml` by an Apache-licensed S3 (SeaweedFS) or use the IONOS storage already in development.
+4. **YuNet and GLiNER2 provenance:** accepted for the MVP. Before real operation with authorities ask a person with legal expertise (training data of YuNet, terms of use of the generated training data of GLiNER2-PII), or switch to a model with clear terms.
+5. **Before any delivery to a third party:** all license texts and notices included, source offers for the LGPL/GPL libraries, MinIO not part of the delivery.

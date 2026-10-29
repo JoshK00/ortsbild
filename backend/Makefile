@@ -1,4 +1,4 @@
-.PHONY: install test test-verbose test-integration graph run
+.PHONY: install test test-verbose test-integration graph run notices
 
 # Create the virtual environment and install the dependencies
 install:
@@ -33,3 +33,7 @@ test-integration:
 # Start the API on this machine (http://127.0.0.1:8000, try /health). Needs backend/.env
 run:
 	PYTHONPATH=. .venv/bin/uvicorn --factory api.main:create_app --port 8000
+
+# Write the licenses of all installed packages to THIRD_PARTY_NOTICES.md (needed before any delivery)
+notices:
+	.venv/bin/pip-licenses --format=markdown --with-license-file --no-license-path --output-file=THIRD_PARTY_NOTICES.md
