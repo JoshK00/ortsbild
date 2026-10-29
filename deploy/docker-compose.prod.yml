@@ -1,0 +1,57 @@
+# Production stack for the Cube: Caddy (HTTPS), the backend and PostgreSQL.
+# The photos live in the IONOS object storage, so there is no MinIO here.
+# Start (on the server, in ~/ortsbild/deploy):
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+# deploy.sh does this for you from your Mac.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # ":80" = plain HTTP on the IP (first tests). With a domain, e.g. api.example.com,
+      # Caddy gets and renews the HTTPS certificate on its own.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgresql://ortsbild:${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env.prod}@postgres:5432/ortsbild
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - backend_logs:/app/logs
+    # No published port: only Caddy reaches the backend, inside the compose network.
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ortsbild
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env.prod}
+      POSTGRES_DB: ortsbild
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../backend/sql/postgres:/docker-entrypoint-initdb.d:ro   # runs on the first start only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ortsbild"]
+      interval: 5s
+      retries: 10
+    # No published port: the database is not reachable from outside.
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  backend_logs:

@@ -132,7 +132,7 @@ def s3_client_from_env():
         aws_secret_access_key=os.environ["STORAGE_SECRET_KEY"],
         region_name=os.getenv("STORAGE_REGION", "us-east-1"),
         # one attempt only: our own retry (privacy/retry.py) decides, so there is no double retry
-        config=Config(retries={"max_attempts": 1}, connect_timeout=5, read_timeout=30),
+        config=Config(signature_version="s3v4", retries={"max_attempts": 1}, connect_timeout=5, read_timeout=30),
     )
 
 
