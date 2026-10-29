@@ -36,17 +36,38 @@ def _overlap_ratio(a: Box, b: Box) -> float:
     return inter / union if union else 0.0
 
 
-def merge_overlapping(boxes: list[Box], min_overlap: float = 0.3) -> list[Box]:
-    """Keep one box per spot: of boxes that overlap strongly the most confident one stays.
+def _area(box: Box) -> int:
+    return max(0, box.right - box.left) * max(0, box.bottom - box.top)
 
-    The full image pass and the overlapping tiles find the same face several times. Without this the
-    redaction log would count one face many times.
+
+def _inside_share(small: Box, big: Box) -> float:
+    """How much of the small box lies inside the big one (0 to 1)."""
+    inter_w = max(0, min(small.right, big.right) - max(small.left, big.left))
+    inter_h = max(0, min(small.bottom, big.bottom) - max(small.top, big.top))
+    return inter_w * inter_h / _area(small) if _area(small) else 0.0
+
+
+def merge_overlapping(
+    boxes: list[Box], min_overlap: float = 0.3, inside_share: float = 0.8, sure_score: float = 0.5
+) -> list[Box]:
+    """Keep one box per spot.
+
+    1. Of boxes that overlap strongly the most confident one stays (the full image pass, the
+       scaled down copies and the tiles find the same face several times).
+    2. A small box that lies inside a bigger, confident box is dropped: it is a part of the same face
+       (a huge face is found as several parts at the tile scale) and it is covered anyway.
+    Without this the redaction log would count one face many times.
     """
     kept: list[Box] = []
     for box in sorted(boxes, key=lambda b: -(b.confidence or 0.0)):
         if all(_overlap_ratio(box, other) < min_overlap for other in kept):
             kept.append(box)
-    return kept
+    big_and_sure = [b for b in kept if (b.confidence or 0.0) >= sure_score]
+    return [
+        box
+        for box in kept
+        if not any(_area(big) > _area(box) and _inside_share(box, big) >= inside_share for big in big_and_sure)
+    ]
 
 
 YUNET_MODEL_PATH = Path(__file__).resolve().parent.parent / "assets" / "face_detection_yunet_2023mar.onnx"
@@ -56,8 +77,8 @@ class YuNetFaceDetector:
     """Finds faces with the small YuNet model (227 KB, CPU, about 80 ms for a 12 MP photo).
 
     Recall counts more than precision here, a missed face is worse than a box too many.
-    Therefore: low score threshold, and big images are also searched in overlapping tiles,
-    so small faces in the background are found too.
+    Therefore: low score threshold, big images are also searched in overlapping tiles (small faces in the
+    background) and in scaled down copies (huge close-up faces).
 
     TODO: Check that the detector is safe to call from several threads at once.
     TODO: Measure the recall on realistic photos (faces far away, turned away, partly covered).
@@ -69,10 +90,12 @@ class YuNetFaceDetector:
         score_threshold: float = 0.3,
         tile_size: int = 1280,
         tile_overlap: float = 0.25,
+        pyramid_sizes: tuple[int, ...] = (640, 1280),
     ) -> None:
         self.score_threshold = score_threshold
         self.tile_size = tile_size
         self.tile_overlap = tile_overlap
+        self.pyramid_sizes = pyramid_sizes
         self._detector = cv2.FaceDetectorYN.create(str(model_path), "", (320, 320), score_threshold)
 
     def _detect_in(self, bgr: np.ndarray, offset_x: int = 0, offset_y: int = 0) -> list[Box]:
@@ -94,8 +117,26 @@ class YuNetFaceDetector:
     def detect(self, image: Image.Image) -> list[Box]:
         bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
         height, width = bgr.shape[:2]
-        boxes = self._detect_in(bgr)  # the whole image first
-        if max(width, height) > self.tile_size:
+        long_side = max(width, height)
+        boxes: list[Box] = []
+
+        # Image pyramid: YuNet only knows faces up to about 300 pixels. A close-up face of 1600 pixels
+        # is found as several small parts at full size, so the image also runs scaled down.
+        for target in self.pyramid_sizes:
+            if long_side > target:
+                scale = target / long_side
+                small = cv2.resize(bgr, (round(width * scale), round(height * scale)), interpolation=cv2.INTER_AREA)
+                for box in self._detect_in(small):
+                    boxes.append(
+                        Box(
+                            round(box.left / scale), round(box.top / scale),
+                            round(box.right / scale), round(box.bottom / scale),
+                            box.kind, box.confidence,
+                        )
+                    )
+
+        boxes.extend(self._detect_in(bgr))  # full size: small faces
+        if long_side > self.tile_size:
             step = max(1, int(self.tile_size * (1 - self.tile_overlap)))
             for top in range(0, max(1, height - self.tile_size) + step, step):
                 for left in range(0, max(1, width - self.tile_size) + step, step):

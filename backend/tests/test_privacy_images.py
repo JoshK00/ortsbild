@@ -242,3 +242,35 @@ def test_blackout_ignores_a_box_completely_outside_the_image():
     """A box beyond the edge covers nothing and must not raise."""
     image = Image.new("RGB", (30, 30), (255, 255, 255))
     assert blackout(image, [Box(100, 100, 120, 120, "face")]).getpixel((5, 5)) == (255, 255, 255)
+
+
+def test_parts_inside_a_big_confident_face_are_dropped():
+    """A huge face is found as several small parts too. They lie inside the big box and are not counted."""
+    from privacy.image_detectors import merge_overlapping
+
+    big = Box(0, 0, 1000, 1400, "face", 0.95)
+    part = Box(200, 100, 500, 400, "face", 0.6)
+    assert merge_overlapping([part, big]) == [big]
+
+
+def test_a_part_inside_an_unsure_big_box_stays():
+    """Only a confident big box swallows smaller ones, an unsure one might be wrong."""
+    from privacy.image_detectors import merge_overlapping
+
+    big = Box(0, 0, 1000, 1400, "face", 0.4)
+    part = Box(200, 100, 500, 400, "face", 0.6)
+    assert len(merge_overlapping([part, big])) == 2
+
+
+def test_a_small_face_next_to_a_big_one_stays():
+    """A box that is not inside the big one is another person."""
+    from privacy.image_detectors import merge_overlapping
+
+    big = Box(0, 0, 1000, 1400, "face", 0.95)
+    other = Box(1200, 100, 1300, 250, "face", 0.7)
+    assert len(merge_overlapping([big, other])) == 2
+
+
+def test_yunet_finds_a_huge_blank_photo_without_error():
+    """A very big image runs through the scaled down copies and the tiles without error."""
+    assert YuNetFaceDetector().detect(Image.new("RGB", (3974, 5000), (200, 200, 200))) == []
