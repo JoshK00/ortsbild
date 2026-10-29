@@ -55,15 +55,27 @@ the authority needs it exactly. The reporter is protected by the pseudonym.
 
 ## 2. Fail closed
 
-If any step fails or is unsure (detector down, confidence too low, unreadable file):
+A step blocks the report when it **fails**: a detector or the storage is down, a file cannot
+be read or decoded, a step that had to run left no result.
 
 - do NOT pass the report on
 - set status `blocked_privacy` and hand it to an operator
 - the blocked report keeps its raw data only until the operator decides
+- log the report id, the step and the error type (never the error message, it can hold raw data)
+
+What does NOT block: a detector that runs fine and finds nothing. A photo without faces or a
+text without personal data is the normal case and passes. A finding with a low score is not a
+reason to block either, it is covered (recall counts more than precision). A detector that
+runs fine but misses something cannot be noticed by the code, that is the residual risk.
+
+**Retry:** only for transient errors (network, timeout, server error 5xx, overload 429) when
+talking to storage and database: up to 3 tries with a growing pause (0.5 s, 1 s). Errors of
+the models or of a file (broken image, bug) are not repeated, they would fail the same way.
 
 Default is blocking. Passing on a reduced report (for example without photos) is a possible alternative.
 
 - TODO: Make this configurable per deployment (block vs. reduced report).
+- TODO: Store the blocked status with its reason durably (database) and give the operator a list of blocked reports to retry or discard.
 
 ## 3. Output: SanitizedReport (what the next agents see)
 

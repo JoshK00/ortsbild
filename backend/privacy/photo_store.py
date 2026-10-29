@@ -1,6 +1,8 @@
 import os
 from typing import Protocol
 
+from privacy.retry import retry
+
 
 class PhotoStore(Protocol):
     """Where the image files live. The privacy layer only knows this interface.
@@ -51,17 +53,20 @@ class SupabasePhotoStore:
 
     def load(self, ref: str) -> bytes:
         bucket, path = split_ref(ref)
-        return self.client.storage.from_(bucket).download(path)
+        return retry(lambda: self.client.storage.from_(bucket).download(path), "storage load")
 
     def save(self, ref: str, data: bytes, content_type: str) -> None:
         bucket, path = split_ref(ref)
-        self.client.storage.from_(bucket).upload(
-            path, data, {"content-type": content_type, "upsert": "true"}
+        retry(
+            lambda: self.client.storage.from_(bucket).upload(
+                path, data, {"content-type": content_type, "upsert": "true"}
+            ),
+            "storage save",
         )
 
     def delete(self, ref: str) -> None:
         bucket, path = split_ref(ref)
-        self.client.storage.from_(bucket).remove([path])
+        retry(lambda: self.client.storage.from_(bucket).remove([path]), "storage delete")
 
 
 def supabase_store_from_env() -> SupabasePhotoStore:

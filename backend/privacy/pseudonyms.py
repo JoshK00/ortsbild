@@ -4,6 +4,8 @@ import os
 import secrets
 from typing import Protocol
 
+from privacy.retry import retry
+
 
 class PseudonymStore(Protocol):
     """Gives every reporter one stable pseudonym. Only the privacy layer may use it."""
@@ -50,11 +52,12 @@ class SupabasePseudonymStore:
         self.secret = secret
 
     def _find(self, identifier_hash: str) -> str | None:
-        result = (
-            self.client.table(self.TABLE)
+        result = retry(
+            lambda: self.client.table(self.TABLE)
             .select("pseudonym")
             .eq("identifier_hash", identifier_hash)
-            .execute()
+            .execute(),
+            "pseudonym lookup",
         )
         return result.data[0]["pseudonym"] if result.data else None
 
@@ -64,11 +67,16 @@ class SupabasePseudonymStore:
         if existing:
             return existing
         # ignore_duplicates: if a parallel request created the row first, keep that one
-        self.client.table(self.TABLE).upsert(
-            {"identifier_hash": identifier_hash, "pseudonym": new_pseudonym()},
-            on_conflict="identifier_hash",
-            ignore_duplicates=True,
-        ).execute()
+        retry(
+            lambda: self.client.table(self.TABLE)
+            .upsert(
+                {"identifier_hash": identifier_hash, "pseudonym": new_pseudonym()},
+                on_conflict="identifier_hash",
+                ignore_duplicates=True,
+            )
+            .execute(),
+            "pseudonym save",
+        )
         return self._find(identifier_hash)
 
 

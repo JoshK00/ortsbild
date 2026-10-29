@@ -1,3 +1,4 @@
+import logging
 import operator
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from privacy.photo_store import PhotoStore, supabase_store_from_env
 from privacy.photos import strip_photo_metadata
 from privacy.pseudonyms import PseudonymStore, supabase_pseudonym_store_from_env
 from privacy.text import sanitize_text
+
+logger = logging.getLogger("ortsbild.privacy")
 
 
 class PrivacyState(TypedDict, total=False):
@@ -49,8 +52,13 @@ def inspect_report(state: PrivacyState) -> dict:
     return {"summary": summary, "status": "running"}
 
 
-def blocked(step: str, error: Exception) -> dict:
-    """Fail closed: block the report. Only the error type is kept, its message could hold raw data."""
+def blocked(step: str, error: Exception, report_id: str) -> dict:
+    """Fail closed: block the report and log it.
+
+    Only the error type is kept and logged, its message (and the traceback) could hold raw data.
+    TODO: Also store the blocked status with its reason durably (database) so an operator finds it.
+    """
+    logger.error("privacy step blocked a report: report_id=%s step=%s error=%s", report_id, step, type(error).__name__)
     return {"status": "blocked_privacy", "block_reason": f"{step}: {type(error).__name__}"}
 
 
@@ -62,7 +70,7 @@ def make_strip_metadata_node(store: PhotoStore):
         try:
             photos, entries = strip_photo_metadata(report.photos, report.id, store)
         except Exception as error:  # fail closed
-            return blocked("strip_metadata", error)
+            return blocked("strip_metadata", error, state["report"].id)
         return {"photos": photos, "redactions": entries}
 
     return strip_metadata_node
@@ -83,7 +91,7 @@ def make_sanitize_photos_node(
                 state["photos"], store, face_detector, options, ocr_engine, text_detectors
             )
         except Exception as error:  # fail closed: a photo we cannot check is not passed on
-            return blocked("sanitize_photos", error)
+            return blocked("sanitize_photos", error, state["report"].id)
         return {"redactions": entries}
 
     return sanitize_photos_node
@@ -99,7 +107,7 @@ def make_sanitize_text_node(detectors: list[TextDetector]):
         try:
             clean, entries = sanitize_text(text, detectors)
         except Exception as error:  # fail closed
-            return blocked("sanitize_text", error)
+            return blocked("sanitize_text", error, state["report"].id)
         return {"text": clean, "redactions": entries}
 
     return sanitize_text_node
@@ -113,7 +121,7 @@ def make_pseudonymize_node(store: PseudonymStore):
         try:
             pseudonym = store.get_or_create(user.identifier, user.identifier_type)
         except Exception as error:  # fail closed
-            return blocked("pseudonymize_user", error)
+            return blocked("pseudonymize_user", error, state["report"].id)
         entry = RedactionEntry(step="pseudonymize_user", kind="user_identifier", count=1)
         return {"pseudonym": pseudonym, "redactions": [entry]}
 
@@ -141,7 +149,7 @@ def make_assemble_node(photo_store: PhotoStore):
             for photo in report.photos:
                 photo_store.delete(photo.ref)
         except Exception as error:  # fail closed
-            return blocked("assemble", error)
+            return blocked("assemble", error, state["report"].id)
         return {"sanitized_report": sanitized}
 
     return assemble_node
