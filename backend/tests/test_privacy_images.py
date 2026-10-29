@@ -215,3 +215,24 @@ def test_graph_covers_personal_text_in_images_when_switched_on():
     assert ocr.calls == 1
     assert sum(pixel(store.load("clean/7c9e/p1.jpg"), (20, 10))) < 30
     assert "phone" in {e.kind for e in result["sanitized_report"].redaction_log.entries}
+
+
+# ---------------------------------------------------------------------------
+# merge_overlapping
+# ---------------------------------------------------------------------------
+
+
+def test_the_same_face_found_twice_counts_once():
+    """The full image pass and a tile find the same face, only the more confident box stays."""
+    from privacy.image_detectors import merge_overlapping
+
+    boxes = [Box(100, 100, 200, 200, "face", 0.6), Box(102, 98, 203, 201, "face", 0.9)]
+    assert merge_overlapping(boxes) == [boxes[1]]
+
+
+def test_two_different_faces_stay_two():
+    """Boxes that do not overlap are different faces."""
+    from privacy.image_detectors import merge_overlapping
+
+    boxes = [Box(0, 0, 50, 50, "face", 0.9), Box(200, 200, 250, 250, "face", 0.8)]
+    assert len(merge_overlapping(boxes)) == 2

@@ -27,6 +27,28 @@ class FaceDetector(Protocol):
     def detect(self, image: Image.Image) -> list[Box]: ...
 
 
+def _overlap_ratio(a: Box, b: Box) -> float:
+    """Intersection over union of two boxes, 0 if they do not touch."""
+    inter_w = max(0, min(a.right, b.right) - max(a.left, b.left))
+    inter_h = max(0, min(a.bottom, b.bottom) - max(a.top, b.top))
+    inter = inter_w * inter_h
+    union = (a.right - a.left) * (a.bottom - a.top) + (b.right - b.left) * (b.bottom - b.top) - inter
+    return inter / union if union else 0.0
+
+
+def merge_overlapping(boxes: list[Box], min_overlap: float = 0.3) -> list[Box]:
+    """Keep one box per spot: of boxes that overlap strongly the most confident one stays.
+
+    The full image pass and the overlapping tiles find the same face several times. Without this the
+    redaction log would count one face many times.
+    """
+    kept: list[Box] = []
+    for box in sorted(boxes, key=lambda b: -(b.confidence or 0.0)):
+        if all(_overlap_ratio(box, other) < min_overlap for other in kept):
+            kept.append(box)
+    return kept
+
+
 YUNET_MODEL_PATH = Path(__file__).resolve().parent.parent / "assets" / "face_detection_yunet_2023mar.onnx"
 
 
@@ -79,5 +101,4 @@ class YuNetFaceDetector:
                 for left in range(0, max(1, width - self.tile_size) + step, step):
                     tile = bgr[top : top + self.tile_size, left : left + self.tile_size]
                     boxes.extend(self._detect_in(tile, left, top))
-        # Overlapping duplicates do no harm: everything is blacked out as a union anyway
-        return boxes
+        return merge_overlapping(boxes)
