@@ -11,3 +11,4 @@ __pycache__/
 .env
 backend/logs/
 backend/THIRD_PARTY_NOTICES.md
+.env.prod
