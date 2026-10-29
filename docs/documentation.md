@@ -214,7 +214,7 @@ Why IONOS and not STACKIT, Google Cloud, Supabase or Vercel:
 
 Open: whether the trial credit also covers servers and the database, the server size (probably 4 GB RAM, to be measured with the finished container), managed PostgreSQL before real operation.
 
-Code changes: `PhotoStore` for S3 (boto3), the pseudonym and status stores talk to PostgreSQL directly (psycopg) with their own database user instead of the Supabase API, a Dockerfile and docker-compose (backend and PostgreSQL), health checks adapted. No data has to be moved, nothing real is stored in Supabase yet.
+Code changes (done, untested against the real stack until Docker runs): `S3PhotoStore` (boto3) for every S3-compatible storage, PostgreSQL stores (psycopg) instead of the Supabase API, `Dockerfile` (CPU build of torch, model shipped in the image) and `docker-compose.yml` (backend, PostgreSQL, MinIO as a local S3), health checks for storage and database. No data has to be moved, nothing real is stored in Supabase yet.
 
 ---
 
@@ -250,7 +250,7 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - May the authority contact the reporter? Decides whether the identifier must be stored encrypted, today only its hash is kept.
 - Gateway: extract the place from an email text, lowercase the mime type, check that a file really is an image.
 - Deletion concept: deadline, raw message (email file) and backups.
-- Adapt the SQL files (`backend/sql/`) to a plain PostgreSQL with its own database user, the Supabase specific lines (`service_role`) go away. `PSEUDONYM_SECRET` is set in `backend/.env`.
+- Move to IONOS: the code for S3 storage and PostgreSQL is written and tested with fakes (`backend/sql/postgres/`, `docker-compose.yml`). Still to do: start Docker Desktop and test the local stack (`docker compose up --build`, `make test-integration`), then remove the Supabase code and its tests (`backend/sql/supabase/`), create the IONOS resources and deploy. Run the backend with its own database user instead of the owner.
 - Build the operator view of blocked reports (the store has `list_blocked`, an endpoint and a way to retry or discard are missing).
 - Send the log to a safe central place with alerts (today terminal and `backend/logs/` only).
 - End-to-end test on a real iPhone: API (FastAPI), app connection, location permission (section 10).

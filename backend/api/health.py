@@ -95,3 +95,42 @@ def supabase_checks(client) -> dict[str, Callable[[], None]]:
     for name in REQUIRED_TABLES:
         checks[f"table_{name}"] = table(name)
     return checks
+
+
+def s3_storage_checks(client, buckets: dict[str, str]) -> dict[str, Callable[[], None]]:
+    """Both buckets (raw, clean) exist and the credentials may use them."""
+
+    def check(logical: str, real: str) -> Callable[[], None]:
+        def run() -> None:
+            try:
+                client.head_bucket(Bucket=real)
+            except Exception as error:
+                status = getattr(error, "response", {}).get("ResponseMetadata", {}).get("HTTPStatusCode")
+                if status == 404:
+                    raise HealthCheckError(f"bucket {logical} does not exist")
+                if status == 403:
+                    raise HealthCheckError(f"no access to bucket {logical}, check the storage keys")
+                raise
+
+        return run
+
+    return {f"storage_{logical}": check(logical, real) for logical, real in buckets.items()}
+
+
+def database_checks(dsn: str, connect=None) -> dict[str, Callable[[], None]]:
+    """The database answers and both tables of the privacy layer exist."""
+    import psycopg
+
+    connect = connect or psycopg.connect
+
+    def database() -> None:
+        with connect(dsn, connect_timeout=5) as connection:
+            rows = connection.execute(
+                "select table_name from information_schema.tables where table_name = any(%s)",
+                (list(REQUIRED_TABLES),),
+            ).fetchall()
+        missing = set(REQUIRED_TABLES) - {row[0] for row in rows}
+        if missing:
+            raise HealthCheckError(f"missing table: {', '.join(sorted(missing))}, run the SQL files")
+
+    return {"database": database}

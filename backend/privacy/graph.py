@@ -13,9 +13,10 @@ from privacy.detectors import Gliner2Detector, PatternDetector, TextDetector
 from privacy.image_detectors import FaceDetector, YuNetFaceDetector
 from privacy.image_text import OcrEngine, RapidOcrEngine
 from privacy.photo_sanitize import ImageOptions, sanitize_photos
-from privacy.photo_store import PhotoStore, supabase_store_from_env
+from privacy.photo_store import PhotoStore, s3_store_from_env
 from privacy.photos import strip_photo_metadata
-from privacy.pseudonyms import PseudonymStore, supabase_pseudonym_store_from_env
+from privacy.postgres_stores import postgres_pseudonym_store_from_env
+from privacy.pseudonyms import PseudonymStore
 from privacy.text import sanitize_text
 
 logger = logging.getLogger("ortsbild.privacy")
@@ -212,15 +213,15 @@ def build_privacy_graph(
 ):
     """Wire the steps together and return the runnable graph.
 
-    Without arguments the production parts are used: the GLiNER2 model and Supabase.
+    Without arguments the production parts are used: the GLiNER2 model, S3 storage and PostgreSQL.
     Tests pass fakes, so they need neither the model nor a network.
     """
     if detectors is None:
         detectors = default_detectors()
     if photo_store is None:
-        photo_store = supabase_store_from_env()
+        photo_store = s3_store_from_env()
     if pseudonym_store is None:
-        pseudonym_store = supabase_pseudonym_store_from_env()
+        pseudonym_store = postgres_pseudonym_store_from_env()
     if face_detector is None:
         face_detector = YuNetFaceDetector()
     if image_options is None:
