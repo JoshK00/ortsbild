@@ -42,44 +42,6 @@ class InMemoryPhotoStore:
         self.files.pop(ref, None)
 
 
-class SupabasePhotoStore:
-    """Stores the files in Supabase Storage. The bucket is the first part of the ref.
-
-    TODO: Use narrower access rules (RLS, own role) instead of the secret key in production.
-    """
-
-    def __init__(self, client) -> None:
-        self.client = client
-
-    def load(self, ref: str) -> bytes:
-        bucket, path = split_ref(ref)
-        return retry(lambda: self.client.storage.from_(bucket).download(path), "storage load")
-
-    def save(self, ref: str, data: bytes, content_type: str) -> None:
-        bucket, path = split_ref(ref)
-        retry(
-            lambda: self.client.storage.from_(bucket).upload(
-                path, data, {"content-type": content_type, "upsert": "true"}
-            ),
-            "storage save",
-        )
-
-    def delete(self, ref: str) -> None:
-        bucket, path = split_ref(ref)
-        retry(lambda: self.client.storage.from_(bucket).remove([path]), "storage delete")
-
-
-def supabase_store_from_env() -> SupabasePhotoStore:
-    """Build the Supabase store from SUPABASE_URL and SUPABASE_SECRET_KEY (backend/.env)."""
-    from dotenv import load_dotenv
-    from supabase import create_client
-
-    load_dotenv()
-    return SupabasePhotoStore(
-        create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SECRET_KEY"])
-    )
-
-
 class S3PhotoStore:
     """Stores the files in an S3-compatible object storage (IONOS, STACKIT, Hetzner, MinIO, ...).
 

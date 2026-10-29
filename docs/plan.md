@@ -22,7 +22,7 @@ Phase 0 housekeeping ──► Phase 1 domain and HTTPS ──► Phase 2 connec
 
 | # | What | Owner | Effort | Done when |
 |---|---|---|---|---|
-| 0.1 | Make sure the leaked Supabase secret key is rotated (it was printed in a chat once) or the Supabase project is deleted | You | S | the old key no longer works |
+| 0.1 | ~~Rotate the leaked Supabase secret key~~ **Done**: the Supabase project is deleted, the key is dead | You | S | done |
 | 0.2 | Cost control at IONOS: set a Cost Alert, check *Cost & Usage*, send the support question (trial credit, suspend, full version) | You | S | alert set, answer received |
 | 0.3 | Check the swap on the server (`swapon --show`) and measure the memory (`docker stats`) to decide Basic S or M | You, Claude | S | numbers written into the documentation |
 | 0.4 | Delete the debug images on the desktop | You | S | files gone |
@@ -34,7 +34,7 @@ iOS refuses plain HTTP, and until then photos and the API key travel unencrypted
 
 | # | What | Owner | Effort | Done when |
 |---|---|---|---|---|
-| 1.1 | Get a domain (a few euros a year) and point an A record to the IP of the Cube | You | S | `nslookup` shows the IP |
+| 1.1 | A hostname for the Cube. Options: **free** hostname that points to the IP (for example `217-154-175-68.sslip.io`, no signup, works at once), a free named one (DuckDNS), or a **real domain** (a few euros a year, better for real operation). Point it to `217.154.175.68` | You | S | `nslookup` shows the IP |
 | 1.2 | Put the domain into `SITE_ADDRESS` in `.env.prod`, restart Caddy, check the certificate | You, Claude | S | `https://<domain>/health` shows ok |
 | 1.3 | Create a **new** API key and swap it (the old one travelled over HTTP) | Claude | S | old key gives 401 |
 | 1.4 | Restrict `/health` (it names our checks), keep it usable for monitoring | Claude | S | only a monitor token or a short answer is public |
@@ -78,7 +78,7 @@ The face detector misses faces that are cut off, turned away or tiny (seen on th
 | 4.6 | Backups of PostgreSQL (dump to the object storage), a test of restoring | Claude | M | restore proven |
 | 4.7 | Monitoring: uptime check on `/health`, the log to a safe place with alerts | Claude, You | M | alert reaches you |
 | 4.8 | Operator view of blocked reports (list, retry, discard) | Claude | M | an endpoint and a simple page |
-| 4.9 | Remove the Supabase code and its tests, test the local compose stack with Docker Desktop | Claude, You | S | no `supabase` in the code |
+| 4.9 | ~~Remove the Supabase code~~ **Done.** Still to do: test the local compose stack with Docker Desktop | You | S | `make test-integration` runs against the local stack |
 | 4.10 | Pin the dependency versions, tests in GitHub Actions on every push | Claude | M | green badge |
 | 4.11 | Decide: stay on the Cube, or move to a managed PostgreSQL, revisit STACKIT | Team | M | decision |
 

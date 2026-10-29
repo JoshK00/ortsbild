@@ -1,13 +1,15 @@
+import io
 import logging
 from datetime import datetime, timezone
 
+import botocore.exceptions
 import httpx
 import pytest
 
 from models.incoming_report import IncomingReport
 from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
-from privacy.photo_store import InMemoryPhotoStore, SupabasePhotoStore
+from privacy.photo_store import InMemoryPhotoStore, S3PhotoStore
 from privacy.pseudonyms import InMemoryPseudonymStore
 from privacy.retry import is_transient_error, retry
 from tests.image_helpers import make_jpeg
@@ -89,34 +91,30 @@ def test_retry_logs_the_error_type_but_not_the_message(caplog):
 
 
 # ---------------------------------------------------------------------------
-# Supabase store uses retry
+# S3 store uses retry
 # ---------------------------------------------------------------------------
 
 
-class FakeBucket:
-    def __init__(self, download):
-        self.download_call = download
+class FakeS3:
+    """Pretends to be the S3 client: the first read fails with a network error."""
 
-    def download(self, path):
-        return self.download_call()
+    def __init__(self, error):
+        self.error, self.calls = error, 0
 
-
-class FakeClient:
-    def __init__(self, download):
-        self.bucket = FakeBucket(download)
-        self.storage = self
-
-    def from_(self, name):
-        return self.bucket
+    def get_object(self, Bucket, Key):
+        self.calls += 1
+        if self.calls == 1:
+            raise self.error
+        return {"Body": io.BytesIO(b"image")}
 
 
-def test_supabase_store_retries_a_network_error(monkeypatch):
+def test_s3_store_retries_a_network_error(monkeypatch):
     """A short network error while loading a photo does not block the report."""
     monkeypatch.setattr("privacy.retry.time.sleep", lambda _: None)
-    flaky = FlakyCall(httpx.ConnectError("x"))
-    store = SupabasePhotoStore(FakeClient(lambda: (flaky(), b"image")[1]))
+    client = FakeS3(botocore.exceptions.EndpointConnectionError(endpoint_url="http://x"))
+    store = S3PhotoStore(client, {"raw": "r", "clean": "c"})
     assert store.load("raw/a/p1.jpg") == b"image"
-    assert flaky.calls == 2
+    assert client.calls == 2
 
 
 # ---------------------------------------------------------------------------

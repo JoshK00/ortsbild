@@ -7,7 +7,7 @@ from privacy.detectors import PatternDetector
 from privacy.photo_store import InMemoryPhotoStore
 from privacy.pseudonyms import InMemoryPseudonymStore
 
-# Fakes only: the diagram needs neither the model nor Supabase, so nothing is loaded.
+# Fakes only: the diagram needs neither the model nor the storage, so nothing is loaded.
 graph = build_privacy_graph(
     [PatternDetector()], InMemoryPhotoStore(), InMemoryPseudonymStore("diagram")
 )

@@ -41,7 +41,7 @@ This is the current plan and may be adjusted.
 | Backend | Python, FastAPI, Pydantic | Pydantic as the shared data contract |
 | Agents | LangGraph + LangChain (model layer, `create_agent`) | Graph with approval pause (interrupt) |
 | Models | Claude for agents and image recognition | GPT / Gemini optional for model comparison |
-| Database | Supabase (EU): Postgres + PostGIS, storage, anonymous auth | Free plan for the MVP |
+| Database and storage | PostgreSQL (container on the IONOS Cube, PostGIS planned) and the IONOS S3 object storage | Supabase was dropped on 2026-10-29, see sections 7 and 11 |
 | External sources | OSM / Overpass, Nominatim, municipality websites | via `httpx` |
 | Tests | `pytest` | 20 to 30 test cases for the evaluation |
 
@@ -74,7 +74,7 @@ flowchart LR
 
 **Policy code:** a normal function without a model. It chooses the level based on classification, research confidence and channel status. The thresholds are configurable so that autonomy can be measured against error rate.
 
-**Data (Supabase):** reports, clusters, status, municipality registry, drafts and checkpoints in Postgres, photos in storage. The status lives in its own table: `received → classified → researching → draft_ready → approved → sent → closed`.
+**Data (PostgreSQL and S3 object storage at IONOS):** reports, clusters, status, municipality registry, drafts and checkpoints in Postgres, photos in storage. The status lives in its own table: `received → classified → researching → draft_ready → approved → sent → closed`.
 
 **Data models (Pydantic, mirrored as Swift `Codable`):**
 
@@ -186,7 +186,7 @@ TODO: Build a small evaluation set of German reports (email with names, defect a
 These points must be signed off by a person with data protection expertise before real citizen data is used, e.g. the university's data protection officer.
 
 - **Controllers** are the operators of the framework (or the authority on its behalf), not the users. The operators conclude the data processing agreement (DPA, German: AVV) with their service providers.
-- **Processors:** hoster, Supabase, model provider. A DPA is needed with each.
+- **Processors:** hoster and storage (IONOS), model provider. A DPA is needed with each.
 - **Photographed third parties** do not sign a DPA. A legal basis is needed (typically legitimate interest, Art. 6(1)(f) GDPR, possibly (e) when acting for an authority), plus transparency and data minimization.
 - **Users:** Responsibility should lie with the operator, not the user. Relevant for photos are the right to one's own image (KUG §§ 22, 23, 33) and § 201a StGB. The gray area around the user's co-responsibility is open.
 - **Mistral (candidate):** according to third-party sources EU endpoint `api.eu.mistral.ai`, DPA for business customers, no training on API data, 30-day retention by default, zero data retention only in certain plans and only for stateless calls. Must be verified against the official documentation.
@@ -199,11 +199,11 @@ Local is enough for development. As soon as real data flows (at the latest from 
 
 - Location in the EU (candidates: Hetzner, IONOS, OVH, Scaleway or the EU region of a hyperscaler). With US companies a residual risk remains because of US law.
 - DPA with the hoster.
-- Supabase: choose the EU region when creating the project (moving later is costly), conclude a DPA.
+- IONOS: the Cube and the object storage are in Germany (Frankfurt), conclude a DPA with IONOS.
 - Build the backend in a container (Docker), do not hard-wire hoster-specific services, so the hoster stays replaceable.
 - Deletion concept: delete raw data after sanitization, no unintended backups containing raw data.
 
-**Decision (2026-10-29): move to IONOS (Germany) for the MVP**, for storage, database and the container of the backend. Supabase stays in place until the move is done and is then dropped.
+**Decision (2026-10-29): move to IONOS (Germany) for the MVP**, for storage, database and the container of the backend. Supabase was dropped afterwards (project deleted, code and SQL removed).
 
 Why IONOS and not STACKIT, Google Cloud, Supabase or Vercel:
 - Self-service with a trial account (200 USD credit for 30 days for object storage, payment details needed). STACKIT is, according to one source, only available to companies, its startup program needs an EU company. A student group is not one.
@@ -223,8 +223,8 @@ Code changes (done, untested against the real stack until Docker runs): `S3Photo
 
 As soon as fellow students upload real photos, real personal data flows. Minimum requirements for the closed test:
 
-1. Backend and Supabase in an EU region.
-2. DPAs with hoster, Supabase and model provider.
+1. Backend, database and storage in an EU region (IONOS, Germany).
+2. DPAs with IONOS and the model provider.
 3. Privacy notice in the app (what happens, that sending is simulated). TestFlight requires a privacy URL and test information for external testers.
 4. Explicit consent from testers at first launch, with a note about the test status.
 5. No real sending to authorities. Sending stays simulated.
@@ -256,7 +256,7 @@ The sorted plan with owners, effort and dependencies is in [plan.md](plan.md). T
 - May the authority contact the reporter? Decides whether the identifier must be stored encrypted, today only its hash is kept.
 - Gateway: extract the place from an email text, lowercase the mime type, check that a file really is an image.
 - Deletion concept: deadline, raw message (email file) and backups.
-- Move to IONOS: the code for S3 storage and PostgreSQL is written and tested with fakes (`backend/sql/postgres/`, `docker-compose.yml`). Still to do: start Docker Desktop and test the local stack (`docker compose up --build`, `make test-integration`), then remove the Supabase code and its tests (`backend/sql/supabase/`), create the IONOS resources and deploy. Run the backend with its own database user instead of the owner.
+- Test the local compose stack with Docker Desktop (`docker compose up --build`, `make test-integration`). Run the backend with its own database user instead of the database owner.
 - Build the operator view of blocked reports (the store has `list_blocked`, an endpoint and a way to retry or discard are missing).
 - Send the log to a safe central place with alerts (today terminal and `backend/logs/` only).
 - Real authentication of the app and a limit of requests per device instead of one shared API key (the key inside the app can be extracted).
@@ -318,6 +318,7 @@ Test data: own photos only, no recognizable third parties.
 | 2026-10-29 | The same face found by the full image pass and the tiles is counted once (overlapping boxes are merged). Boxes completely outside the image are ignored | The log showed 186 faces for one crowd photo, about 130 of them were duplicates. |
 | 2026-10-29 | Prevention at the source: the app tells the user to keep people and license plates out of the photo and to take the defect from close by (text in the first chat message, more to come as an overlay in the camera view and a warning with Apple Vision before the upload) | The best protection is data that is never taken (data minimization). It also lowers the load on the detectors. |
 | 2026-10-29 | First deployment to the IONOS Cube (plain HTTP on the IP, no domain yet) tested end to end with the real parts: `/health` all ok, no key gives 401, a text with a name, phone number and plate comes back with placeholders, a portrait photo comes back with the whole face covered and the raw photo deleted (only the clean copy is left in the bucket), a crowd photo is rejected with `too_many_faces` and nothing is left in either bucket, the status table shows `sanitized` and `rejected` | Proof that image, models, object storage, database and the status handling work together on the server. Still open: HTTPS with a domain (photos and the API key travel unencrypted until then), the app connection. |
+| 2026-10-29 | Supabase is dropped: the project is deleted, its code (`Supabase*Store`, `supabase_checks`), its SQL (`sql/supabase/`) and its tests are removed. The earlier decision rows about Supabase above are history | Not needed after the move to IONOS. The Supabase key that was shown in a chat once is dead with the project. |
 | 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |
 
 ---

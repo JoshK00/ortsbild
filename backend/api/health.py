@@ -10,7 +10,6 @@ from privacy.image_text import OcrEngine
 
 logger = logging.getLogger("ortsbild.api")
 
-REQUIRED_BUCKETS = {"raw", "clean"}
 REQUIRED_TABLES = ("pseudonyms", "reports")
 
 
@@ -63,37 +62,6 @@ def model_checks(
         )
     if ocr_engine is not None:
         checks["ocr"] = lambda: ocr_engine.read(Image.new("RGB", (200, 60), "white")) and None
-    return checks
-
-
-def supabase_checks(client) -> dict[str, Callable[[], None]]:
-    """The storage buckets and the tables of the privacy layer are reachable."""
-
-    def storage() -> None:
-        buckets = {bucket.name for bucket in client.storage.list_buckets()}
-        missing = REQUIRED_BUCKETS - buckets
-        if missing:
-            raise HealthCheckError(f"missing bucket: {', '.join(sorted(missing))}")
-
-    def table(name: str) -> Callable[[], None]:
-        def check() -> None:
-            try:
-                client.table(name).select("*").limit(1).execute()
-            except Exception as error:
-                code = str(getattr(error, "code", ""))  # database error code, no secret in it
-                if code == "42501":
-                    reason = "permission denied, run the GRANT lines of its SQL file"
-                elif code in ("42P01", "PGRST205"):
-                    reason = "table does not exist, run its SQL file"
-                else:
-                    reason = f"not reachable ({type(error).__name__} {code})".strip()
-                raise HealthCheckError(f"table {name}: {reason}")
-
-        return check
-
-    checks: dict[str, Callable[[], None]] = {"storage": storage}
-    for name in REQUIRED_TABLES:
-        checks[f"table_{name}"] = table(name)
     return checks
 
 

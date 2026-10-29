@@ -26,7 +26,7 @@ endif
 graph:
 	PYTHONPATH=. .venv/bin/python scripts/draw_graph.py
 
-# Tests against the real Supabase project (needs backend/.env)
+# Tests against the real object storage and database (needs backend/.env, start docker compose first)
 test-integration:
 	.venv/bin/pytest -v -m integration
 

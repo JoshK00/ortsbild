@@ -1,10 +1,7 @@
 import hashlib
 import hmac
-import os
 import secrets
 from typing import Protocol
-
-from privacy.retry import retry
 
 
 class PseudonymStore(Protocol):
@@ -36,55 +33,3 @@ class InMemoryPseudonymStore:
         if key not in self.pseudonyms:
             self.pseudonyms[key] = new_pseudonym()
         return self.pseudonyms[key]
-
-
-class SupabasePseudonymStore:
-    """Keeps the pseudonyms in the Supabase table `pseudonyms` (see sql/001_pseudonyms.sql).
-
-    TODO: Open question: may the authority contact the reporter? If yes, the identifier has to
-          be stored (encrypted) as well, today only its hash is kept.
-    """
-
-    TABLE = "pseudonyms"
-
-    def __init__(self, client, secret: str) -> None:
-        self.client = client
-        self.secret = secret
-
-    def _find(self, identifier_hash: str) -> str | None:
-        result = retry(
-            lambda: self.client.table(self.TABLE)
-            .select("pseudonym")
-            .eq("identifier_hash", identifier_hash)
-            .execute(),
-            "pseudonym lookup",
-        )
-        return result.data[0]["pseudonym"] if result.data else None
-
-    def get_or_create(self, identifier: str, identifier_type: str) -> str:
-        identifier_hash = hash_identifier(identifier, identifier_type, self.secret)
-        existing = self._find(identifier_hash)
-        if existing:
-            return existing
-        # ignore_duplicates: if a parallel request created the row first, keep that one
-        retry(
-            lambda: self.client.table(self.TABLE)
-            .upsert(
-                {"identifier_hash": identifier_hash, "pseudonym": new_pseudonym()},
-                on_conflict="identifier_hash",
-                ignore_duplicates=True,
-            )
-            .execute(),
-            "pseudonym save",
-        )
-        return self._find(identifier_hash)
-
-
-def supabase_pseudonym_store_from_env() -> SupabasePseudonymStore:
-    """Build the store from SUPABASE_URL, SUPABASE_SECRET_KEY and PSEUDONYM_SECRET (backend/.env)."""
-    from dotenv import load_dotenv
-    from supabase import create_client
-
-    load_dotenv()
-    client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SECRET_KEY"])
-    return SupabasePseudonymStore(client, os.environ["PSEUDONYM_SECRET"])

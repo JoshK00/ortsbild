@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-import httpx
 import pytest
 
 from models.incoming_report import IncomingReport
@@ -8,7 +7,7 @@ from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
 from privacy.photo_store import InMemoryPhotoStore
 from privacy.pseudonyms import InMemoryPseudonymStore
-from privacy.report_status import InMemoryReportStatusStore, SupabaseReportStatusStore
+from privacy.report_status import InMemoryReportStatusStore
 from privacy.service import process_report
 
 
@@ -62,59 +61,3 @@ def test_unexpected_crash_is_recorded_as_blocked_and_raised_again():
     with pytest.raises(MemoryError):
         process_report(make_report(), CrashingGraph(), store)
     assert store.rows["7c9e"].block_reason == "graph: MemoryError"
-
-
-# ---------------------------------------------------------------------------
-# Supabase variant with a fake client
-# ---------------------------------------------------------------------------
-
-
-class FakeTable:
-    def __init__(self, data=None, fail_first=False):
-        self.data, self.fail_first, self.upserts, self.calls = data or [], fail_first, [], 0
-
-    def upsert(self, row, on_conflict):
-        self.upserts.append((row, on_conflict))
-        return self
-
-    def select(self, columns):
-        return self
-
-    def eq(self, column, value):
-        return self
-
-    def order(self, column, desc):
-        return self
-
-    def execute(self):
-        self.calls += 1
-        if self.fail_first and self.calls == 1:
-            raise httpx.ConnectError("x")
-        return self
-
-
-class FakeClient:
-    def __init__(self, table):
-        self.fake_table = table
-
-    def table(self, name):
-        assert name == "reports"
-        return self.fake_table
-
-
-def test_supabase_store_writes_one_row_per_report(monkeypatch):
-    """The status is written as an upsert on the report id, including the block reason."""
-    monkeypatch.setattr("privacy.retry.time.sleep", lambda _: None)
-    table = FakeTable(fail_first=True)  # the first call fails with a network error, retry saves it
-    SupabaseReportStatusStore(FakeClient(table)).set_status("7c9e", "blocked_privacy", "app", "sanitize_text: X")
-    row, conflict = table.upserts[0]
-    assert conflict == "id"
-    assert (row["id"], row["status"], row["block_reason"]) == ("7c9e", "blocked_privacy", "sanitize_text: X")
-    assert table.calls == 2
-
-
-def test_supabase_store_lists_blocked_reports():
-    """The operator list is built from the rows of the table."""
-    table = FakeTable(data=[{"id": "a", "status": "blocked_privacy", "source_type": "app", "block_reason": "assemble: ValueError"}])
-    [row] = SupabaseReportStatusStore(FakeClient(table)).list_blocked()
-    assert (row.report_id, row.block_reason) == ("a", "assemble: ValueError")
