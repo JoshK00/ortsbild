@@ -200,7 +200,7 @@ def test_report_without_text_skips_the_text_step():
     result = build_privacy_graph([detector], store, InMemoryPseudonymStore("test-secret")).invoke({"report": report})
     assert detector.calls == 0
     assert "text" not in result
-    assert store.loads == 1  # the photo step still ran
+    assert store.loads == 2  # both photo steps still ran: strip_metadata and sanitize_photos
 
 
 def test_report_with_neither_photos_nor_text_runs_no_sanitizing_step():

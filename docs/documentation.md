@@ -136,7 +136,7 @@ The privacy stage runs **before** all other agents, including classification. Ra
 
 1. **Deterministic part in our own backend, no external model call:**
    - Text: patterns and checksums (email, phone, IBAN, license plate), plus a small local NER model for names and addresses (candidates: Presidio, GLiNER).
-   - Image: remove EXIF, find faces and license plates with small local detectors (CPU, a few MB), redaction with Pillow/OpenCV.
+   - Image: remove EXIF, find faces with the small local detector YuNet (CPU), cover them with black bars (Pillow). Text in images and license plates are optional (OCR plus the text step, see the decision log).
    - Result: sanitized report plus a log of what was removed.
 2. **Model-assisted part, only with sanitized material:** decisions that need context, e.g. whether an address is the defect location or a private address.
 
@@ -230,7 +230,9 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - Choose the model provider for agents after the privacy stage.
 - Choose the hoster, confirm that the Supabase project runs in an EU region (not yet confirmed for the dev project) and conclude DPAs.
 - Have the legal assessment signed off by an expert (section 6), including pseudonyms as personal data and the license plate question (decision log, 2026-10-29).
-- Build `sanitize_photos` (faces first), choose the face detector (candidate: OpenCV YuNet). License plates in photos only later and optional.
+- Test the face detector (YuNet) on realistic photos, in particular small and turned away faces. Decide on a dedicated license plate detector after that test. Optional spike: EgoBlur (needs the model license form).
+- Use word boxes instead of line boxes for text in images, so only the personal word is covered.
+- Check the license of YuNet's training data (WIDER FACE is research-only) before a production use.
 - Test the text detector and the image detectors on realistic German examples (evaluation set).
 - Decide which addresses in a text are the defect and which are private (addresses are not redacted for now).
 - May the authority contact the reporter? Decides whether the identifier must be stored encrypted, today only its hash is kept.
@@ -247,7 +249,7 @@ Goal: take a photo and write a text on a real iPhone, send both through the priv
 
 The app already has the `ReportService` protocol with `MockReportService`, so the app gets a second implementation (`BackendReportService`) and the UI stays.
 
-Backend: finish the privacy layer (pseudonym and assemble are done, `sanitize_photos` is open), then a FastAPI endpoint `POST /reports` (photo, text, location, device id) that stores the photo in the bucket `raw`, runs the graph and returns the `SanitizedReport` with the clean photo.
+Backend: the privacy layer is complete (faces, optional text in images, pseudonym, assemble), next a FastAPI endpoint `POST /reports` (photo, text, location, device id) that stores the photo in the bucket `raw`, runs the graph and returns the `SanitizedReport` with the clean photo.
 App: ask for the location (mandatory in `IncomingReport`, needs `NSLocationWhenInUseUsageDescription`), `BackendReportService`, an exception for plain HTTP in the local network (App Transport Security) for the test.
 Reachability: iPhone and Mac in the same Wi-Fi, no tunnel for real photos (the image would pass a third party).
 Test data: own photos only, no recognizable third parties.
@@ -273,4 +275,8 @@ Test data: own photos only, no recognizable third parties.
 | 2026-10-28 | Steps only run when their input exists, a router in the graph picks the next step that applies | No face detection on a report without photos, no text detector without text. |
 | 2026-10-29 | Pseudonyms: only a keyed hash (HMAC with `PSEUDONYM_SECRET`) of the identifier is stored, in its own table with row level security and no policy (`backend/sql/001_pseudonyms.sql`) | A database leak must not reveal the reporters. Open: contact by the authority would need the identifier stored encrypted. |
 | 2026-10-29 | Faces in photos are mandatory to blur. License plates in photos are optional and off by default. License plates in text are always redacted | Faces identify directly. A plate identifies only through the keeper register, so the risk is lower. For some reports (illegal dumping) the plate can be the evidence the authority needs. Detection of plates has no standard model and costs a lot. Rule for testers: no cars with readable plates. Open for sign-off: blur or keep when the plate is the evidence. |
+| 2026-10-29 | Faces in photos: YuNet (OpenCV Zoo, MIT, 227 KB) with a low score threshold (0.3), tiles for big photos and a 30 % margin around each box. Measured on an Apple M4 Pro CPU: 5 ms for 640x480, 81 ms for a full 12 MP photo | Recall counts more than precision. Considered and rejected: MediaPipe (made for close frontal faces), SCRFD (pretrained weights are research-only), YOLO face models (AGPL), cloud APIs (raw image would leave our backend). |
+| 2026-10-29 | Faces are covered with black bars, not blurred | A blur can partly be undone, a bar cannot. |
+| 2026-10-29 | Text in images: RapidOCR (PP-OCRv6 small, Apache 2.0, models ship with the package) reads the text, OUR text step decides what is personal, only those lines are covered. Off by default (`ImageOptions.text_in_image`) | One OCR model covers name tags, notes and readable plates. Not all text is covered because graffiti and street signs are often the defect. OCR costs time, so it is a switch. |
+| 2026-10-29 | No dedicated license plate detector for now | The OCR path covers plates that can be read. A dedicated detector finds plates even when they cannot be read, but adds a model. Decide after a test with realistic photos. Candidates (researched, not decided): `open-image-models` YOLOv9-t (about 8 MB, license to check), open-lpr (Apache 2.0, about 20 MB). EgoBlur (Apache 2.0 per its README, but two models of about 400 MB each, weights only after an email form and a license agreement aimed at researchers, built for Aria glasses data) was not tested. |
 | 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |

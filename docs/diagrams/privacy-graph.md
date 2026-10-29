@@ -7,6 +7,7 @@ graph TD;
 	__start__([start]):::first
 	inspect_report(inspect_report)
 	strip_metadata(strip_metadata)
+	sanitize_photos(sanitize_photos)
 	sanitize_text(sanitize_text)
 	pseudonymize_user(pseudonymize_user)
 	assemble(assemble)
@@ -16,16 +17,22 @@ graph TD;
 	inspect_report -.-> __end__;
 	inspect_report -.-> assemble;
 	inspect_report -.-> pseudonymize_user;
+	inspect_report -.-> sanitize_photos;
 	inspect_report -.-> sanitize_text;
 	inspect_report -.-> strip_metadata;
 	pseudonymize_user -.-> __end__;
 	pseudonymize_user -.-> assemble;
+	sanitize_photos -.-> __end__;
+	sanitize_photos -.-> assemble;
+	sanitize_photos -.-> pseudonymize_user;
+	sanitize_photos -.-> sanitize_text;
 	sanitize_text -.-> __end__;
 	sanitize_text -.-> assemble;
 	sanitize_text -.-> pseudonymize_user;
 	strip_metadata -.-> __end__;
 	strip_metadata -.-> assemble;
 	strip_metadata -.-> pseudonymize_user;
+	strip_metadata -.-> sanitize_photos;
 	strip_metadata -.-> sanitize_text;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
@@ -33,7 +40,7 @@ graph TD;
 ```
 
 Dotted arrows are decisions, not fixed order. After every step a router picks the next step
-that applies to this report: `strip_metadata` only if there are photos, `sanitize_text` only
+that applies to this report: `strip_metadata` and `sanitize_photos` only if there are photos, `sanitize_text` only
 if there is text, `pseudonymize_user` and `assemble` for every report. A blocked report goes straight to the end (fail closed).
 
 ## Planned (hand-drawn, not yet built)

@@ -9,6 +9,9 @@ from models.incoming_report import IncomingReport, Photo
 from models.sanitized_report import RedactionEntry, SanitizedReport
 from privacy.assemble import assemble_report
 from privacy.detectors import Gliner2Detector, PatternDetector, TextDetector
+from privacy.image_detectors import FaceDetector, YuNetFaceDetector
+from privacy.image_text import OcrEngine, RapidOcrEngine
+from privacy.photo_sanitize import ImageOptions, sanitize_photos
 from privacy.photo_store import PhotoStore, supabase_store_from_env
 from privacy.photos import strip_photo_metadata
 from privacy.pseudonyms import PseudonymStore, supabase_pseudonym_store_from_env
@@ -63,6 +66,27 @@ def make_strip_metadata_node(store: PhotoStore):
         return {"photos": photos, "redactions": entries}
 
     return strip_metadata_node
+
+
+def make_sanitize_photos_node(
+    store: PhotoStore,
+    face_detector: FaceDetector,
+    options: ImageOptions,
+    ocr_engine: OcrEngine | None,
+    text_detectors: list[TextDetector],
+):
+    """Build the sanitize_photos step: black out faces (and personal text) in the clean copies."""
+
+    def sanitize_photos_node(state: PrivacyState) -> dict:
+        try:
+            entries = sanitize_photos(
+                state["photos"], store, face_detector, options, ocr_engine, text_detectors
+            )
+        except Exception as error:  # fail closed: a photo we cannot check is not passed on
+            return blocked("sanitize_photos", error)
+        return {"redactions": entries}
+
+    return sanitize_photos_node
 
 
 def make_sanitize_text_node(detectors: list[TextDetector]):
@@ -174,6 +198,9 @@ def build_privacy_graph(
     detectors: list[TextDetector] | None = None,
     photo_store: PhotoStore | None = None,
     pseudonym_store: PseudonymStore | None = None,
+    face_detector: FaceDetector | None = None,
+    image_options: ImageOptions | None = None,
+    ocr_engine: OcrEngine | None = None,
 ):
     """Wire the steps together and return the runnable graph.
 
@@ -186,11 +213,21 @@ def build_privacy_graph(
         photo_store = supabase_store_from_env()
     if pseudonym_store is None:
         pseudonym_store = supabase_pseudonym_store_from_env()
+    if face_detector is None:
+        face_detector = YuNetFaceDetector()
+    if image_options is None:
+        image_options = ImageOptions()
+    if ocr_engine is None and image_options.text_in_image:
+        ocr_engine = RapidOcrEngine()  # only built when text in images is switched on
 
     # The order of this list is the order of the pipeline.
-    # TODO: Add sanitize_photos (applies: has_photos), between strip_metadata and sanitize_text.
     steps = [
         Step("strip_metadata", make_strip_metadata_node(photo_store), has_photos),
+        Step(
+            "sanitize_photos",
+            make_sanitize_photos_node(photo_store, face_detector, image_options, ocr_engine, detectors),
+            has_photos,
+        ),
         Step("sanitize_text", make_sanitize_text_node(detectors), has_text),
         Step("pseudonymize_user", make_pseudonymize_node(pseudonym_store), always),
         Step("assemble", make_assemble_node(photo_store), always),

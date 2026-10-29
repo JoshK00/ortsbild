@@ -22,11 +22,16 @@ b. sanitize_text   (if text)
            which are private. Pure detection cannot tell. Needs the
            model-assisted step, working on already sanitized text only.
 
-c. sanitize_photos (for each photo)
-     find faces          -> small local detector (CPU)
-     find license plates -> small local detector (CPU)
-     blur / black out every box
-     if a detector fails or is below the confidence threshold -> see 2. Fail closed
+c. sanitize_photos (for each photo, works on the clean copy from step a)
+     find faces          -> YuNet (small local detector, CPU), low threshold, tiles for big photos
+     cover every box with a black bar (a bar cannot be undone, a blur partly can)
+     optional (off by default): text in the image
+       read the text with OCR (RapidOCR), run it through the text detectors of step b,
+       cover only the lines that contain personal data (graffiti and street signs stay,
+       they are often the defect). A license plate that the OCR can read is found by the
+       plate pattern.
+     TODO: A dedicated license plate detector only if the OCR misses too many plates.
+     if a detector fails -> see 2. Fail closed
 
 d. pseudonymize_user
      look up user.identifier in the pseudonym table
