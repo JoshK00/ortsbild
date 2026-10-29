@@ -13,3 +13,8 @@ create index if not exists reports_status_idx on public.reports (status);
 
 -- Row level security on and NO policy: only the backend with the secret key can access it.
 alter table public.reports enable row level security;
+
+-- The backend role needs explicit access (a table created here does not grant it).
+-- The public roles get nothing, the app must never read or write this table directly.
+grant select, insert, update, delete on public.reports to service_role;
+revoke all on public.reports from anon, authenticated;

@@ -80,7 +80,14 @@ def supabase_checks(client) -> dict[str, Callable[[], None]]:
             try:
                 client.table(name).select("*").limit(1).execute()
             except Exception as error:
-                raise HealthCheckError(f"table {name} not reachable ({type(error).__name__}), was its SQL run?")
+                code = str(getattr(error, "code", ""))  # database error code, no secret in it
+                if code == "42501":
+                    reason = "permission denied, run the GRANT lines of its SQL file"
+                elif code in ("42P01", "PGRST205"):
+                    reason = "table does not exist, run its SQL file"
+                else:
+                    reason = f"not reachable ({type(error).__name__} {code})".strip()
+                raise HealthCheckError(f"table {name}: {reason}")
 
         return check
 

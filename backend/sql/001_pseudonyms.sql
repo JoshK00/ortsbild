@@ -9,3 +9,8 @@ create table if not exists public.pseudonyms (
 -- Row level security on and NO policy: the app and anonymous users cannot read or write.
 -- Only the backend with the secret key (service role) can access the table.
 alter table public.pseudonyms enable row level security;
+
+-- The backend role needs explicit access (a table created here does not grant it).
+-- The public roles get nothing, the app must never read or write this table directly.
+grant select, insert, update, delete on public.pseudonyms to service_role;
+revoke all on public.pseudonyms from anon, authenticated;

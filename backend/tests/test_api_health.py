@@ -98,7 +98,13 @@ class FakeSupabase:
 
     def table(self, name):
         if name not in self.tables:
-            raise RuntimeError("relation does not exist")
+            error = RuntimeError("relation does not exist")
+            error.code = "PGRST205"
+            raise error
+        if name in getattr(self, "forbidden", []):
+            error = RuntimeError("permission denied")
+            error.code = "42501"
+            raise error
         return self
 
     def select(self, columns):
@@ -122,8 +128,16 @@ def test_supabase_checks_name_the_missing_bucket_and_table():
     checks = supabase_checks(FakeSupabase(["raw"], ["pseudonyms"]))
     results = {r.name: r for r in run_checks(checks)}
     assert results["storage"].detail == "missing bucket: clean"
-    assert "table reports not reachable" in results["table_reports"].detail
+    assert results["table_reports"].detail == "table reports: table does not exist, run its SQL file"
     assert results["table_pseudonyms"].ok
+
+
+def test_supabase_checks_tell_a_missing_permission_from_a_missing_table():
+    """"permission denied" needs the GRANT lines, not a new table, the message says which."""
+    client = FakeSupabase(["raw", "clean"], ["pseudonyms", "reports"])
+    client.forbidden = ["reports"]
+    results = {r.name: r for r in run_checks(supabase_checks(client))}
+    assert results["table_reports"].detail == "table reports: permission denied, run the GRANT lines of its SQL file"
 
 
 # ---------------------------------------------------------------------------

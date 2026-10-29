@@ -202,7 +202,19 @@ Local is enough for development. As soon as real data flows (at the latest from 
 - Build the backend in a container (Docker), do not hard-wire hoster-specific services, so the hoster stays replaceable.
 - Deletion concept: delete raw data after sanitization, no unintended backups containing raw data.
 
-**Open:** choose the hoster, possibly check university infrastructure.
+**Decision (2026-10-29): move to IONOS (Germany) for the MVP**, for storage, database and the container of the backend. Supabase stays in place until the move is done and is then dropped.
+
+Why IONOS and not STACKIT, Google Cloud, Supabase or Vercel:
+- Self-service with a trial account (200 USD credit for 30 days for object storage, payment details needed). STACKIT is, according to one source, only available to companies, its startup program needs an EU company. A student group is not one.
+- Cost: object storage about 0.007 EUR per GB and month. Managed PostgreSQL costs noticeably at both providers (STACKIT about 142 to 206 EUR per month, IONOS roughly 50 EUR for a small instance, check the price list). For the MVP PostgreSQL runs as a container next to the backend, a managed instance with backups comes before real operation.
+- PostgreSQL with PostGIS (needed for the duplicate check), S3-compatible object storage and managed Kubernetes are available.
+- A German provider is not subject to US access law (the CLOUD Act risk that applies to Google Cloud, Vercel and, as far as we know, to Supabase through its US parent and cloud provider). A DPA with one provider is enough.
+- STACKIT is better in certification (BSI C5 Type 2 vs Type 1) and tooling (CLI, API-first). Worth a second look before real operation with authorities. The move would be small because all access sits behind interfaces.
+- Vercel (serverless) does not fit the backend: package size, cold start with the models. It would fit the authority dashboard.
+
+Open: whether the trial credit also covers servers and the database, the server size (probably 4 GB RAM, to be measured with the finished container), managed PostgreSQL before real operation.
+
+Code changes: `PhotoStore` for S3 (boto3), the pseudonym and status stores talk to PostgreSQL directly (psycopg) with their own database user instead of the Supabase API, a Dockerfile and docker-compose (backend and PostgreSQL), health checks adapted. No data has to be moved, nothing real is stored in Supabase yet.
 
 ---
 
@@ -228,7 +240,7 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - Clarify order and scope of agents 3 to 7.
 - Categories: do the six MVP categories stay or become configurable per municipality?
 - Choose the model provider for agents after the privacy stage.
-- Choose the hoster, confirm that the Supabase project runs in an EU region (not yet confirmed for the dev project) and conclude DPAs.
+- Hosting: create the IONOS account, check what the trial credit covers, measure the memory of the container to choose the server size, conclude the DPA with IONOS. Decide when to switch from PostgreSQL in a container to a managed instance with backups. Revisit STACKIT before real operation with authorities.
 - Have the legal assessment signed off by an expert (section 6), including pseudonyms as personal data and the license plate question (decision log, 2026-10-29).
 - Test the face detector (YuNet) on realistic photos, in particular small and turned away faces. Decide on a dedicated license plate detector after that test. Optional spike: EgoBlur (needs the model license form).
 - Use word boxes instead of line boxes for text in images, so only the personal word is covered.
@@ -238,7 +250,7 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - May the authority contact the reporter? Decides whether the identifier must be stored encrypted, today only its hash is kept.
 - Gateway: extract the place from an email text, lowercase the mime type, check that a file really is an image.
 - Deletion concept: deadline, raw message (email file) and backups.
-- Run the two SQL files in the Supabase SQL editor (`backend/sql/001_pseudonyms.sql`, `002_reports.sql`) and set `PSEUDONYM_SECRET` in `backend/.env`. `/health` shows `degraded` until then.
+- Adapt the SQL files (`backend/sql/`) to a plain PostgreSQL with its own database user, the Supabase specific lines (`service_role`) go away. `PSEUDONYM_SECRET` is set in `backend/.env`.
 - Build the operator view of blocked reports (the store has `list_blocked`, an endpoint and a way to retry or discard are missing).
 - Send the log to a safe central place with alerts (today terminal and `backend/logs/` only).
 - End-to-end test on a real iPhone: API (FastAPI), app connection, location permission (section 10).
@@ -288,4 +300,5 @@ Test data: own photos only, no recognizable third parties.
 | 2026-10-29 | Technical log: Python logger `ortsbild` to the terminal and to `backend/logs/ortsbild.log` (rotating, 5 MB, 3 old files, not in git). Level from `LOG_LEVEL` | Fast to read for developers. The log does not belong in the database (volume, cost). Later a central log service with alerts once the backend is hosted. |
 | 2026-10-29 | Status of every report in a Supabase table `reports` (processing, sanitized, blocked_privacy, with the reason), SQL in `backend/sql/002_reports.sql`, row level security without policy. `process_report` keeps it up to date, also when the graph crashes | The operator must find blocked reports and the status has to survive a restart. The table holds no personal data. |
 | 2026-10-29 | `GET /health` (FastAPI): 200 if all models answer and Supabase (buckets, both tables) is reachable, 503 with the failing parts otherwise. The same checks run at startup, the app starts even if one fails | A missing model or table is noticed before the first real report. Only error types and our own safe messages are shown, never secrets. |
+| 2026-10-29 | Move storage, database and backend hosting to IONOS (Germany) for the MVP, PostgreSQL first as a container next to the backend | See section 7: self-service access, cost, PostGIS and S3 available, no US parent company. Supabase is dropped after the move. |
 | 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |
