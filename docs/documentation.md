@@ -237,6 +237,8 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 
 ## 9. Open items
 
+The sorted plan with owners, effort and dependencies is in [plan.md](plan.md). This list is the raw collection.
+
 - Wait for the team's architecture overview, then replace section 3.
 - Clarify order and scope of agents 3 to 7.
 - Categories: do the six MVP categories stay or become configurable per municipality?
