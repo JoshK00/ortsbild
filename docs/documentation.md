@@ -332,6 +332,8 @@ Checked from the model cards and repositories, the license files inside the inst
 | **MinIO** (local S3 in `docker-compose.yml`) | AGPL-3.0 | The community edition is **archived** since April 2026, no patches. Only used on the dev machine, bound to 127.0.0.1, unmodified. | low for license, medium for security (dev only) |
 | Docker base images (python, postgres) | various, standard | Debian packages (GPL/LGPL), PostgreSQL license. Normal for any container. | low |
 
+The open points per model and the checklists are collected in [model-license.md](model-license.md).
+
 ### What we have to do
 
 1. **Now, cheap:** keep the licenses and sources next to the model files (`backend/assets/README.md`), cite the YuNet paper, generate the notices with `make notices` before any delivery.
