@@ -8,6 +8,7 @@ from models.incoming_report import IncomingReport, Photo
 from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
 from privacy.photo_store import InMemoryPhotoStore, split_ref
+from privacy.pseudonyms import InMemoryPseudonymStore
 from privacy.photos import strip_exif, strip_photo_metadata
 from tests.image_helpers import make_heic, make_jpeg, make_png
 
@@ -133,12 +134,12 @@ def test_graph_strips_metadata_then_sanitizes_text():
         [{"id": "p1", "mime_type": "image/jpeg", "ref": "raw/7c9e/p1.jpg"}],
         text="Call 0151 2345678",
     )
-    graph = build_privacy_graph([PatternDetector()], store)
+    graph = build_privacy_graph([PatternDetector()], store, InMemoryPseudonymStore("test-secret"))
     result = graph.invoke({"report": report})
     assert result["status"] == "running"
     assert result["photos"][0].ref == "clean/7c9e/p1.jpg"
     assert result["text"] == "Call <PHONE>"
-    assert {e.kind for e in result["redactions"]} == {"exif", "phone"}
+    assert {e.kind for e in result["redactions"]} == {"exif", "phone", "user_identifier"}
 
 
 def test_graph_blocks_and_stops_when_a_photo_cannot_be_read():
@@ -147,7 +148,7 @@ def test_graph_blocks_and_stops_when_a_photo_cannot_be_read():
         [{"id": "p1", "mime_type": "image/jpeg", "ref": "raw/7c9e/missing.jpg"}],
         text="Call 0151 2345678",
     )
-    graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore())
+    graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore(), InMemoryPseudonymStore("test-secret"))
     result = graph.invoke({"report": report})
     assert result["status"] == "blocked_privacy"
     assert result["block_reason"].startswith("strip_metadata")
@@ -185,7 +186,7 @@ class CountingDetector:
 def test_report_without_photos_skips_the_photo_step():
     """No photo, no photo step: the store is never touched."""
     store, detector = CountingStore(), CountingDetector()
-    result = build_privacy_graph([detector], store).invoke({"report": make_report([], text="Pothole")})
+    result = build_privacy_graph([detector], store, InMemoryPseudonymStore("test-secret")).invoke({"report": make_report([], text="Pothole")})
     assert store.loads == 0
     assert "photos" not in result
     assert detector.calls == 1  # the text step still ran
@@ -196,7 +197,7 @@ def test_report_without_text_skips_the_text_step():
     store, detector = CountingStore(), CountingDetector()
     store.save("raw/7c9e/p1.jpg", make_jpeg(), "image/jpeg")
     report = make_report([{"id": "p1", "mime_type": "image/jpeg", "ref": "raw/7c9e/p1.jpg"}], text=None)
-    result = build_privacy_graph([detector], store).invoke({"report": report})
+    result = build_privacy_graph([detector], store, InMemoryPseudonymStore("test-secret")).invoke({"report": report})
     assert detector.calls == 0
     assert "text" not in result
     assert store.loads == 1  # the photo step still ran
@@ -205,6 +206,6 @@ def test_report_without_text_skips_the_text_step():
 def test_report_with_neither_photos_nor_text_runs_no_sanitizing_step():
     """Nothing to sanitize: both steps are skipped and the report is not blocked."""
     store, detector = CountingStore(), CountingDetector()
-    result = build_privacy_graph([detector], store).invoke({"report": make_report([], text=None)})
+    result = build_privacy_graph([detector], store, InMemoryPseudonymStore("test-secret")).invoke({"report": make_report([], text=None)})
     assert (store.loads, detector.calls) == (0, 0)
     assert result["status"] == "running"

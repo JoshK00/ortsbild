@@ -6,10 +6,12 @@ from typing import Annotated, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from models.incoming_report import IncomingReport, Photo
-from models.sanitized_report import RedactionEntry
+from models.sanitized_report import RedactionEntry, SanitizedReport
+from privacy.assemble import assemble_report
 from privacy.detectors import Gliner2Detector, PatternDetector, TextDetector
 from privacy.photo_store import PhotoStore, supabase_store_from_env
 from privacy.photos import strip_photo_metadata
+from privacy.pseudonyms import PseudonymStore, supabase_pseudonym_store_from_env
 from privacy.text import sanitize_text
 
 
@@ -25,6 +27,8 @@ class PrivacyState(TypedDict, total=False):
     text: str | None  # sanitized text, placeholders instead of personal data
     # Annotated with operator.add: every step APPENDS its entries instead of replacing the list
     redactions: Annotated[list[RedactionEntry], operator.add]
+    pseudonym: str
+    sanitized_report: SanitizedReport  # the result, only there if nothing blocked
     status: Literal["running", "blocked_privacy"]
     block_reason: str
 
@@ -77,6 +81,53 @@ def make_sanitize_text_node(detectors: list[TextDetector]):
     return sanitize_text_node
 
 
+def make_pseudonymize_node(store: PseudonymStore):
+    """Build the pseudonymize_user step: replace the plain identifier by a stable pseudonym."""
+
+    def pseudonymize_node(state: PrivacyState) -> dict:
+        user = state["report"].user
+        try:
+            pseudonym = store.get_or_create(user.identifier, user.identifier_type)
+        except Exception as error:  # fail closed
+            return blocked("pseudonymize_user", error)
+        entry = RedactionEntry(step="pseudonymize_user", kind="user_identifier", count=1)
+        return {"pseudonym": pseudonym, "redactions": [entry]}
+
+    return pseudonymize_node
+
+
+def make_assemble_node(photo_store: PhotoStore):
+    """Build the assemble step: create the SanitizedReport, then delete the raw photos.
+
+    TODO: Also delete the raw message (source.raw_ref, e.g. the email file) and define the
+          deletion deadline and whether backups may hold raw data.
+    """
+
+    def assemble_node(state: PrivacyState) -> dict:
+        report = state["report"]
+        try:
+            sanitized = assemble_report(
+                report,
+                text=state.get("text"),
+                photos=state.get("photos", []),
+                pseudonym=state["pseudonym"],
+                redactions=state.get("redactions", []),
+            )
+            # Only after the sanitized report exists: a failed run keeps the raw data for the operator
+            for photo in report.photos:
+                photo_store.delete(photo.ref)
+        except Exception as error:  # fail closed
+            return blocked("assemble", error)
+        return {"sanitized_report": sanitized}
+
+    return assemble_node
+
+
+def always(state: PrivacyState) -> bool:
+    """For steps that have to run for every report."""
+    return True
+
+
 def has_photos(state: PrivacyState) -> bool:
     """True if the report carries at least one photo."""
     return bool(state["report"].photos)
@@ -122,6 +173,7 @@ def default_detectors() -> list[TextDetector]:
 def build_privacy_graph(
     detectors: list[TextDetector] | None = None,
     photo_store: PhotoStore | None = None,
+    pseudonym_store: PseudonymStore | None = None,
 ):
     """Wire the steps together and return the runnable graph.
 
@@ -132,12 +184,16 @@ def build_privacy_graph(
         detectors = default_detectors()
     if photo_store is None:
         photo_store = supabase_store_from_env()
+    if pseudonym_store is None:
+        pseudonym_store = supabase_pseudonym_store_from_env()
 
     # The order of this list is the order of the pipeline.
-    # TODO: Add sanitize_photos (applies: has_photos), pseudonymize_user and assemble (always apply).
+    # TODO: Add sanitize_photos (applies: has_photos), between strip_metadata and sanitize_text.
     steps = [
         Step("strip_metadata", make_strip_metadata_node(photo_store), has_photos),
         Step("sanitize_text", make_sanitize_text_node(detectors), has_text),
+        Step("pseudonymize_user", make_pseudonymize_node(pseudonym_store), always),
+        Step("assemble", make_assemble_node(photo_store), always),
     ]
 
     graph = StateGraph(PrivacyState)

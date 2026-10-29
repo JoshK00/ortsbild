@@ -6,6 +6,7 @@ from models.incoming_report import IncomingReport
 from privacy.detectors import Entity, PatternDetector, is_valid_iban
 from privacy.graph import build_privacy_graph
 from privacy.photo_store import InMemoryPhotoStore
+from privacy.pseudonyms import InMemoryPseudonymStore
 from privacy.text import merge_entities, redact_text, sanitize_text
 
 
@@ -131,7 +132,7 @@ def make_report(text):
 
 def test_graph_sanitizes_the_text_and_fills_the_log():
     """The step replaces personal data in the text and appends to the redaction log."""
-    graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore())
+    graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore(), InMemoryPseudonymStore("test-secret"))
     result = graph.invoke({"report": make_report("Call 0151 2345678 about the pothole")})
     assert result["text"] == "Call <PHONE> about the pothole"
     assert result["redactions"][0].kind == "phone"
@@ -140,16 +141,16 @@ def test_graph_sanitizes_the_text_and_fills_the_log():
 
 def test_graph_without_text_passes_without_entries():
     """A report without text is fine: the text step is skipped, nothing is redacted."""
-    graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore())
+    graph = build_privacy_graph([PatternDetector()], InMemoryPhotoStore(), InMemoryPseudonymStore("test-secret"))
     result = graph.invoke({"report": make_report(None)})
     assert "text" not in result
-    assert result.get("redactions", []) == []
+    assert [e.kind for e in result["redactions"]] == ["user_identifier"]  # only the pseudonym step
     assert result["status"] == "running"
 
 
 def test_graph_fails_closed_when_a_detector_breaks():
     """If a detector fails, the report is blocked and no unsanitized text is passed on."""
-    graph = build_privacy_graph([BrokenDetector()], InMemoryPhotoStore())
+    graph = build_privacy_graph([BrokenDetector()], InMemoryPhotoStore(), InMemoryPseudonymStore("test-secret"))
     result = graph.invoke({"report": make_report("Call 0151 2345678")})
     assert result["status"] == "blocked_privacy"
     assert "text" not in result

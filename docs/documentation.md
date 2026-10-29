@@ -228,7 +228,49 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - Clarify order and scope of agents 3 to 7.
 - Categories: do the six MVP categories stay or become configurable per municipality?
 - Choose the model provider for agents after the privacy stage.
-- Choose hoster and Supabase region, conclude DPAs.
-- Have the legal assessment signed off by an expert (section 6).
-- Test the image detectors on realistic photos.
+- Choose hoster and Supabase region check (done for the dev project: EU), conclude DPAs.
+- Have the legal assessment signed off by an expert (section 6), including pseudonyms as personal data and the license plate question (decision log, 2026-10-29).
+- Build `sanitize_photos` (faces first), choose the face detector (candidate: OpenCV YuNet). License plates in photos only later and optional.
+- Test the text detector and the image detectors on realistic German examples (evaluation set).
+- Decide which addresses in a text are the defect and which are private (addresses are not redacted for now).
+- May the authority contact the reporter? Decides whether the identifier must be stored encrypted, today only its hash is kept.
+- Gateway: extract the place from an email text, lowercase the mime type, check that a file really is an image.
+- Deletion concept: deadline, raw message (email file) and backups.
+- End-to-end test on a real iPhone: API (FastAPI), app connection, location permission (section 10).
 - Example municipality, check the name (App Store, domain), authority dashboard.
+
+---
+
+## 10. Plan: end-to-end test with the iOS app
+
+Goal: take a photo and write a text on a real iPhone, send both through the privacy layer and get the sanitized report back into the chat as proof ("Daten anonymisiert", cleaned photo and text next to the original).
+
+The app already has the `ReportService` protocol with `MockReportService`, so the app gets a second implementation (`BackendReportService`) and the UI stays.
+
+Backend: finish the privacy layer (pseudonym and assemble are done, `sanitize_photos` is open), then a FastAPI endpoint `POST /reports` (photo, text, location, device id) that stores the photo in the bucket `raw`, runs the graph and returns the `SanitizedReport` with the clean photo.
+App: ask for the location (mandatory in `IncomingReport`, needs `NSLocationWhenInUseUsageDescription`), `BackendReportService`, an exception for plain HTTP in the local network (App Transport Security) for the test.
+Reachability: iPhone and Mac in the same Wi-Fi, no tunnel for real photos (the image would pass a third party).
+Test data: own photos only, no recognizable third parties.
+
+---
+
+## 11. Decision log
+
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-10-26 | Framework with connectors instead of just an app, 6 to 7 agents | Team meeting. Existing apps and forms connect through connectors. |
+| 2026-10-27 | Privacy runs before everything else, raw data never goes to an external model provider | Email and third-party sources arrive unprotected. |
+| 2026-10-27 | The privacy layer is mostly rules and small local models, not an LLM. Detectors run inside our own backend (CPU, no GPU server) | Self-hosted large models do not scale, small detectors do. |
+| 2026-10-27 | Fail closed: if a step fails or is unsure the report is blocked, the raw data stays for the operator | A half-sanitized report must never get through. |
+| 2026-10-27 | `location` is mandatory in `IncomingReport`, the gateway rejects reports without one | A report without a place is meaningless. |
+| 2026-10-27 | The gateway receives raw data inside our backend. The external geocoder only gets the extracted address, without sender or other text | Nothing may link the address to a user. |
+| 2026-10-27 | Strict data contracts: one base class with strict types, no unknown fields, frozen objects. Raw `IncomingReport` and `SanitizedReport` are separate types, the latter has no user field | The type system enforces that no plain identifier survives the privacy layer. |
+| 2026-10-27 | The location is NOT coarsened, it passes unchanged | It is the location of the defect, the authority needs it exactly. The reporter is protected by the pseudonym. Open: many exact locations of one pseudonym could form a movement profile (sign-off). |
+| 2026-10-28 | Text detector GLiNER2-PII plus patterns with checksums | See section 5. |
+| 2026-10-28 | Addresses in text are not redacted by default | The street in a report is often the defect location. Needs the model-assisted step to tell them apart. |
+| 2026-10-28 | Photos live in Supabase Storage, buckets `raw` and `clean`, both private. A reference has the form `<bucket>/<path>` | Raw photos need stricter protection and are deleted after sanitizing. Access goes through a `PhotoStore` interface (in-memory variant for tests). |
+| 2026-10-28 | HEIC/HEIF photos are accepted and converted to JPEG while EXIF is stripped | Most photos from the iOS app are HEIC. Later steps then see one format. |
+| 2026-10-28 | Steps only run when their input exists, a router in the graph picks the next step that applies | No face detection on a report without photos, no text detector without text. |
+| 2026-10-29 | Pseudonyms: only a keyed hash (HMAC with `PSEUDONYM_SECRET`) of the identifier is stored, in its own table with row level security and no policy (`backend/sql/001_pseudonyms.sql`) | A database leak must not reveal the reporters. Open: contact by the authority would need the identifier stored encrypted. |
+| 2026-10-29 | Faces in photos are mandatory to blur. License plates in photos are optional and off by default. License plates in text are always redacted | Faces identify directly. A plate identifies only through the keeper register, so the risk is lower. For some reports (illegal dumping) the plate can be the evidence the authority needs. Detection of plates has no standard model and costs a lot. Rule for testers: no cars with readable plates. Open for sign-off: blur or keep when the plate is the evidence. |
+| 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |
