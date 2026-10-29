@@ -25,6 +25,11 @@ class ImageOptions:
 
     faces: bool = True
     text_in_image: bool = False  # off by default, OCR costs time
+    # A photo with more people than this is rejected (the detector misses turned away, cut off or
+    # tiny faces, so a crowd cannot be made safe). Only faces with a score of at least
+    # crowd_min_score count, weak boxes on textures must not make a normal street photo a "crowd".
+    max_faces: int = 10
+    crowd_min_score: float = 0.5
 
 
 def entries_from_boxes(boxes: list[Box]) -> list[RedactionEntry]:
@@ -84,8 +89,11 @@ def sanitize_photos(
     options: ImageOptions,
     ocr_engine: OcrEngine | None,
     text_detectors: list[TextDetector],
-) -> list[RedactionEntry]:
-    """Black out faces (and personal text) in the clean copies, in place. Returns the log entries."""
+) -> tuple[list[RedactionEntry], int]:
+    """Black out faces (and personal text) in the clean copies, in place.
+
+    Returns the log entries and the number of faces that count for the crowd limit.
+    """
     all_boxes: list[Box] = []
     for photo in photos:
         data, boxes = sanitize_image(
@@ -94,4 +102,9 @@ def sanitize_photos(
         if boxes:
             store.save(photo.ref, data, photo.mime_type)
             all_boxes.extend(boxes)
-    return entries_from_boxes(all_boxes)
+    counted_faces = sum(
+        1
+        for box in all_boxes
+        if box.kind == "face" and (box.confidence if box.confidence is not None else 1.0) >= options.crowd_min_score
+    )
+    return entries_from_boxes(all_boxes), counted_faces

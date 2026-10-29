@@ -20,7 +20,8 @@ final class ChatViewModel {
         messages = [
             ChatMessage(
                 sender: .agent,
-                content: .text("Hallo! Mach ein Foto vom Mangel oder lade eins hoch. Um den Rest kümmere ich mich.")
+                // TODO: Show these photo tips as an overlay in the camera view too, and warn before the upload if faces are visible (Apple Vision)
+                content: .text("Hallo! Mach ein Foto vom Mangel oder lade eins hoch. Um den Rest kümmere ich mich.\n\nTipp für das Foto: Bitte halte Personen und Kennzeichen aus dem Bild heraus und nimm den Mangel aus der Nähe auf.")
             )
         ]
     }

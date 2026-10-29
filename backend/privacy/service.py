@@ -9,7 +9,7 @@ logger = logging.getLogger("ortsbild.privacy")
 def process_report(report: IncomingReport, graph, status_store: ReportStatusStore) -> dict:
     """Run one report through the privacy graph and keep its status up to date.
 
-    processing -> sanitized, or blocked_privacy with the reason. An unexpected error that no
+    processing -> sanitized, blocked_privacy with the reason, or rejected (the photo is not suitable). An unexpected error that no
     step caught is also recorded as blocked, then raised again.
     """
     source_type = report.source.type
@@ -24,6 +24,8 @@ def process_report(report: IncomingReport, graph, status_store: ReportStatusStor
         raise
     if result.get("status") == "blocked_privacy":
         status_store.set_status(report.id, "blocked_privacy", source_type, result.get("block_reason"))
+    elif result.get("status") == "rejected":
+        status_store.set_status(report.id, "rejected", source_type, result.get("reject_reason"))
     else:
         status_store.set_status(report.id, "sanitized", source_type)
     return result

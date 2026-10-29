@@ -36,8 +36,9 @@ class PrivacyState(TypedDict, total=False):
     redactions: Annotated[list[RedactionEntry], operator.add]
     pseudonym: str
     sanitized_report: SanitizedReport  # the result, only there if nothing blocked
-    status: Literal["running", "blocked_privacy"]
+    status: Literal["running", "blocked_privacy", "rejected"]
     block_reason: str
+    reject_reason: str  # why the photo was not accepted, e.g. too_many_faces
 
 
 def inspect_report(state: PrivacyState) -> dict:
@@ -87,12 +88,19 @@ def make_sanitize_photos_node(
     """Build the sanitize_photos step: black out faces (and personal text) in the clean copies."""
 
     def sanitize_photos_node(state: PrivacyState) -> dict:
+        report = state["report"]
         try:
-            entries = sanitize_photos(
+            entries, faces = sanitize_photos(
                 state["photos"], store, face_detector, options, ocr_engine, text_detectors
             )
+            if faces > options.max_faces:
+                # Not an error: the photo is just not suitable. Nothing is kept, the person takes a new one.
+                for photo in [*report.photos, *state["photos"]]:
+                    store.delete(photo.ref)
+                logger.info("photo rejected: report_id=%s reason=too_many_faces faces=%d", report.id, faces)
+                return {"status": "rejected", "reject_reason": "too_many_faces"}
         except Exception as error:  # fail closed: a photo we cannot check is not passed on
-            return blocked("sanitize_photos", error, state["report"].id)
+            return blocked("sanitize_photos", error, report.id)
         return {"redactions": entries}
 
     return sanitize_photos_node
@@ -188,7 +196,7 @@ def make_router(steps: list[Step], index: int):
     """
 
     def router(state: PrivacyState) -> str:
-        if state.get("status") == "blocked_privacy":
+        if state.get("status") in ("blocked_privacy", "rejected"):
             return END
         for step in steps[index + 1 :]:
             if step.applies(state):

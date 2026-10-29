@@ -123,6 +123,11 @@ def create_reports_router(get_services: Callable[[], Services], get_api_key: Cal
         if result.get("status") == "blocked_privacy":
             # No reason for the client, it is in the log and in the status table
             return JSONResponse({"id": report_id, "status": "blocked", "report": None, "photo_urls": []})
+        if result.get("status") == "rejected":
+            # The photo is gone. Only a short reason code, the app shows the advice to the user.
+            return JSONResponse(
+                {"id": report_id, "status": "rejected", "reason": result.get("reject_reason"), "report": None, "photo_urls": []}
+            )
         sanitized = result["sanitized_report"]
         return JSONResponse(
             {

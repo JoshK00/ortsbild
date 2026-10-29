@@ -2,7 +2,7 @@
 -- One row per report: where it is, and why it was blocked. No personal data in it.
 create table if not exists reports (
     id text primary key,
-    status text not null check (status in ('processing', 'sanitized', 'blocked_privacy')),
+    status text not null check (status in ('processing', 'sanitized', 'blocked_privacy', 'rejected')),
     block_reason text,  -- step and error type only, never an error message
     source_type text not null,
     created_at timestamptz not null default now(),

@@ -149,6 +149,7 @@ The privacy stage runs **before** all other agents, including classification. Ra
 **Model layer:** One configuration entry per agent (provider, model, endpoint). A European API is planned for agents after the privacy stage (candidate: Mistral, EU endpoint only, hard-wired in the configuration, never the global default). The provider stays interchangeable until the team has decided.
 
 **Known limits:**
+- Crowd test (2026-10-29, a public photo of a crowd): YuNet found the many small faces in the background, but missed a large face cut off at the image edge and a face looking down, and it drew two large boxes on the pavement and an arm. A different threshold does not fix the misses. Answer: reject crowds, ask the user to keep people out of the photo, plan a second layer (Apple Vision on the device, a stronger server model such as EgoBlur, not tested).
 - No detector finds everything (faces turned away, name tags, house numbers, handwriting). Measure the hit rate with real examples and document it.
 - Addresses are the weakest class for NER models.
 - The result is usually pseudonymization, not full anonymization in the GDPR sense.
@@ -242,6 +243,9 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - Choose the model provider for agents after the privacy stage.
 - Hosting: create the IONOS account, check what the trial credit covers, measure the memory of the container to choose the server size, conclude the DPA with IONOS. Decide when to switch from PostgreSQL in a container to a managed instance with backups. Revisit STACKIT before real operation with authorities.
 - Have the legal assessment signed off by an expert (section 6), including pseudonyms as personal data and the license plate question (decision log, 2026-10-29).
+- Second layer for faces: Apple Vision on the device before the upload, and/or a stronger server model (spike with EgoBlur). Warn the user in the app before the upload if faces are visible.
+- Show the photo tips as an overlay in the camera view of the app, with a hint when a photo was rejected.
+- Run `backend/sql/postgres/003_status_rejected.sql` on the server database once (it allows the status `rejected`).
 - Test the face detector (YuNet) on realistic photos, in particular small and turned away faces. Decide on a dedicated license plate detector after that test. Optional spike: EgoBlur (needs the model license form).
 - Use word boxes instead of line boxes for text in images, so only the personal word is covered.
 - Check the license of YuNet's training data (WIDER FACE is research-only) before a production use.
@@ -308,6 +312,9 @@ Test data: own photos only, no recognizable third parties.
 | 2026-10-29 | IONOS Object Storage for the photos: contract-owned buckets in Frankfurt (`eu-central-4`, endpoint `https://s3.eu-central-4.ionoscloud.com`) or Berlin (`eu-central-3`), signature version 4, bucket names unique across IONOS | The S3 code works with any S3 compatible provider, only the endpoint, region and keys differ. |
 | 2026-10-29 | `POST /reports` (multipart: lat, lon, device_id, optional text and photo) is the entry of the app and `GET /reports/{id}/photos/{photo}` returns the sanitized photo. The photo type is detected from the content (JPEG, PNG, HEIC), never from the header the client claims. At most 15 MB, 5000 characters. The answer is the sanitized report or `blocked` without any reason | The gateway rules (image only, location mandatory) are enforced at the border. A blocked report must not tell the client what was found. |
 | 2026-10-29 | Every report endpoint needs the header `X-API-Key`. A server without a configured `API_KEY` rejects everything (503). `/health` stays open | The server is public on the internet, without a key anyone could fill our storage. One shared key is not real authentication, it is only protection against drive-by use (TODO in the code). |
+| 2026-10-29 | A photo with more than `MAX_FACES` (default 10) faces is **rejected**: status `rejected` (reason `too_many_faces`), raw and clean copies are deleted at once, the app gets only the reason code. Only faces with a score of at least 0.5 count, the weaker boxes are still covered | The face detector misses faces that are turned away, cut off or tiny (seen on a crowd test photo: a large cut-off face at the edge was not found), so a crowd cannot be made safe. A weak box on a texture must not turn a normal street photo into a "crowd". A rejected photo is no case for an operator, nothing is kept. |
+| 2026-10-29 | The same face found by the full image pass and the tiles is counted once (overlapping boxes are merged). Boxes completely outside the image are ignored | The log showed 186 faces for one crowd photo, about 130 of them were duplicates. |
+| 2026-10-29 | Prevention at the source: the app tells the user to keep people and license plates out of the photo and to take the defect from close by (text in the first chat message, more to come as an overlay in the camera view and a warning with Apple Vision before the upload) | The best protection is data that is never taken (data minimization). It also lowers the load on the detectors. |
 | 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |
 
 ---

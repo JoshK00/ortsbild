@@ -29,7 +29,7 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     detectors = default_detectors()
     # Lower = fewer missed faces but more false boxes. Tune it with FACE_SCORE_THRESHOLD in .env.prod.
     face_detector = YuNetFaceDetector(score_threshold=float(os.getenv("FACE_SCORE_THRESHOLD", "0.3")))
-    options = ImageOptions()
+    options = ImageOptions(max_faces=int(os.getenv("MAX_FACES", "10")))
     ocr_engine = RapidOcrEngine() if options.text_in_image else None
     photo_store = s3_store_from_env()
 

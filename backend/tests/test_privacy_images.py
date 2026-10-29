@@ -236,3 +236,9 @@ def test_two_different_faces_stay_two():
 
     boxes = [Box(0, 0, 50, 50, "face", 0.9), Box(200, 200, 250, 250, "face", 0.8)]
     assert len(merge_overlapping(boxes)) == 2
+
+
+def test_blackout_ignores_a_box_completely_outside_the_image():
+    """A box beyond the edge covers nothing and must not raise."""
+    image = Image.new("RGB", (30, 30), (255, 255, 255))
+    assert blackout(image, [Box(100, 100, 120, 120, "face")]).getpixel((5, 5)) == (255, 255, 255)

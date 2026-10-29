@@ -4,7 +4,7 @@ from typing import Literal, Protocol
 
 from privacy.retry import retry
 
-Status = Literal["processing", "sanitized", "blocked_privacy"]
+Status = Literal["processing", "sanitized", "blocked_privacy", "rejected"]
 
 
 @dataclass(frozen=True)
