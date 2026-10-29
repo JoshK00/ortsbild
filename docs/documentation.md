@@ -238,9 +238,9 @@ As soon as fellow students upload real photos, real personal data flows. Minimum
 - May the authority contact the reporter? Decides whether the identifier must be stored encrypted, today only its hash is kept.
 - Gateway: extract the place from an email text, lowercase the mime type, check that a file really is an image.
 - Deletion concept: deadline, raw message (email file) and backups.
-- Store the blocked status with its reason durably in the database and build an operator list of blocked reports (retry or discard). Today a blocked report is only visible in the result of the graph and in the log.
-- Check at startup that all models load (YuNet, GLiNER2, OCR) and expose a health endpoint (`/health`), so a missing model is noticed before the first real report.
-- Send the log to a safe place with alerts (today only the Python logger `ortsbild.privacy`).
+- Run the two SQL files in the Supabase SQL editor (`backend/sql/001_pseudonyms.sql`, `002_reports.sql`) and set `PSEUDONYM_SECRET` in `backend/.env`. `/health` shows `degraded` until then.
+- Build the operator view of blocked reports (the store has `list_blocked`, an endpoint and a way to retry or discard are missing).
+- Send the log to a safe central place with alerts (today terminal and `backend/logs/` only).
 - End-to-end test on a real iPhone: API (FastAPI), app connection, location permission (section 10).
 - Example municipality, check the name (App Store, domain), authority dashboard.
 
@@ -285,4 +285,7 @@ Test data: own photos only, no recognizable third parties.
 | 2026-10-29 | Retry only for transient errors of storage and database (network, timeout, 5xx, 429): 3 tries, pause 0.5 s then 1 s. No retry for model or file errors | A short network error must not block a report. A broken image or a detector bug fails the same way again. |
 | 2026-10-29 | A blocked report is logged with report id, step and error type, never the error message or traceback | The message can contain raw data. |
 | 2026-10-29 | Fail closed blocks on errors, not on "nothing found" and not on low scores | A photo without faces is the normal case. Low-score findings are covered instead of blocked. A miss without an error cannot be detected by the code (residual risk). |
+| 2026-10-29 | Technical log: Python logger `ortsbild` to the terminal and to `backend/logs/ortsbild.log` (rotating, 5 MB, 3 old files, not in git). Level from `LOG_LEVEL` | Fast to read for developers. The log does not belong in the database (volume, cost). Later a central log service with alerts once the backend is hosted. |
+| 2026-10-29 | Status of every report in a Supabase table `reports` (processing, sanitized, blocked_privacy, with the reason), SQL in `backend/sql/002_reports.sql`, row level security without policy. `process_report` keeps it up to date, also when the graph crashes | The operator must find blocked reports and the status has to survive a restart. The table holds no personal data. |
+| 2026-10-29 | `GET /health` (FastAPI): 200 if all models answer and Supabase (buckets, both tables) is reachable, 503 with the failing parts otherwise. The same checks run at startup, the app starts even if one fails | A missing model or table is noticed before the first real report. Only error types and our own safe messages are shown, never secrets. |
 | 2026-10-29 | The privacy layer stays on LangGraph although it is mostly plain code | Fail closed as a branch, the pause for an operator later, one node type for the overall graph, and the graph can draw itself (`make graph`). |

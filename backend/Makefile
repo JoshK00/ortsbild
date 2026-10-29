@@ -1,9 +1,9 @@
-.PHONY: install test test-verbose test-integration graph
+.PHONY: install test test-verbose test-integration graph run
 
 # Create the virtual environment and install the dependencies
 install:
 	python3 -m venv .venv
-	.venv/bin/pip install pydantic pytest langgraph gliner2 torch transformers huggingface_hub supabase python-dotenv pillow pillow-heif opencv-python-headless rapidocr onnxruntime
+	.venv/bin/pip install pydantic pytest langgraph gliner2 torch transformers huggingface_hub supabase python-dotenv pillow pillow-heif opencv-python-headless rapidocr onnxruntime fastapi uvicorn
 
 # Run all tests, or only one file: make test T=incoming_report
 test:
@@ -28,3 +28,7 @@ graph:
 # Tests against the real Supabase project (needs backend/.env)
 test-integration:
 	.venv/bin/pytest -v -m integration
+
+# Start the API on this machine (http://127.0.0.1:8000, try /health). Needs backend/.env
+run:
+	PYTHONPATH=. .venv/bin/uvicorn --factory api.main:create_app --port 8000
