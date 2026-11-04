@@ -14,9 +14,6 @@ struct BackendReportService: ReportService {
     let client: BackendClient
     private let location = LocationService()
     private let places = PlaceService()
-    /// The steps after the privacy layer (category, follow-up question, draft) are not built on the server yet.
-    // TODO: Replace with the real backend steps once classification, research and drafting exist.
-    private let laterSteps = MockReportService()
 
     init(client: BackendClient) {
         self.client = client
@@ -33,11 +30,32 @@ struct BackendReportService: ReportService {
     }
 
     func answer(_ option: String) -> AsyncStream<ChatContent> {
-        laterSteps.answer(option)
+        // TODO: The backend asks no follow-up questions yet (docs/classification-plan.md, C7)
+        immediately([.text("Diese Antwort wird noch nicht ausgewertet.")])
     }
 
     func perform(_ action: DraftAction) -> AsyncStream<ChatContent> {
-        laterSteps.perform(action)
+        switch action {
+        case .approve:
+            // TODO: The sending is simulated (docs/plan.md 5.7). The user sends the letter with "Teilen" under the draft.
+            return immediately([
+                .status("Entwurf freigegeben"),
+                .text("Im Prototyp wird nichts automatisch gesendet. Mit „Teilen“ unter dem Entwurf kannst du die Nachricht samt Foto selbst an die Stelle schicken."),
+            ])
+        case .close:
+            return immediately([.text("Die Meldung wurde geschlossen.")])
+        case .revise, .wrongAuthority:
+            // TODO: Revise (the user's addition) and a new research without the refused authority (docs/research-plan.md)
+            return immediately([.text("Das folgt in einer späteren Version.")])
+        }
+    }
+
+    /// The contents at once, one after another, without a pause.
+    private func immediately(_ contents: [ChatContent]) -> AsyncStream<ChatContent> {
+        AsyncStream { continuation in
+            contents.forEach { continuation.yield($0) }
+            continuation.finish()
+        }
     }
 
     // MARK: Steps
@@ -139,7 +157,7 @@ struct BackendReportService: ReportService {
             emit(.sanitized(SanitizedResult(text: report.text, photo: image, entries: report.redactionLog.entries)))
             guard let classification = response.classification else {
                 emit(.status("Die Kategorie konnte noch nicht bestimmt werden"))
-                emit(.text("So sieht deine Meldung aus, nachdem alles Persönliche entfernt wurde. Der Entwurf an die Behörde folgt in einer späteren Version."))
+                emit(.text("Ohne Kategorie kann ich noch keinen Entwurf schreiben. Bitte versuche es später noch einmal."))
                 return
             }
             if classification.emergency {
@@ -150,7 +168,21 @@ struct BackendReportService: ReportService {
             let sure = classification.isUnsure ? ", unsicher" : ""
             emit(.status("Kategorie: \(classification.categoryName) (\(Int((classification.confidence * 100).rounded())) %\(sure)), \(classification.laneName)"))
             emit(.text(authorityText(response.research)))
-            emit(.text("So sieht deine Meldung aus, nachdem alles Persönliche entfernt wurde. Der Entwurf an die Behörde folgt in einer späteren Version."))
+            if let draft = response.draft {
+                emit(.draft(ReportDraft(
+                    subject: draft.subject,
+                    body: draft.body,
+                    authority: draft.authority ?? "Empfänger noch offen",
+                    version: draft.version,
+                    recipient: draft.contact.map { "\($0.kindName): \($0.target)" },
+                    language: draft.language,
+                    summaryDE: draft.summaryDe,
+                    photo: image
+                )))
+                emit(.text("Prüfe den Entwurf. Stimmen Stelle und Text, gib ihn frei."))
+            } else {
+                emit(.text("Ich konnte keinen Entwurf schreiben. Bitte versuche es später noch einmal."))
+            }
         case "rejected":
             if response.reason == "too_many_faces" {
                 emit(.text("Auf dem Foto sind zu viele Personen zu sehen. Ich habe es nicht gespeichert. Bitte mach ein neues Foto von nahem, ohne Personen im Bild."))

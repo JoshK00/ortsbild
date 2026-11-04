@@ -22,7 +22,7 @@ private enum StoredContent: Codable {
     case photo(file: String, caption: String?)
     case status(String)
     case question(String, options: [String])
-    case draft(subject: String, body: String, authority: String, version: Int)
+    case draft(subject: String, body: String, authority: String, version: Int, recipient: String?, language: String?, summaryDE: String?, photoFile: String?)
     case emergency
     case sanitized(text: String?, photoFile: String?, changes: [String])
 }
@@ -163,7 +163,12 @@ final class TicketStore {
             content = .photo(file: file, caption: caption)
         case .status(let text): content = .status(text)
         case .question(let text, let options): content = .question(text, options: options)
-        case .draft(let draft): content = .draft(subject: draft.subject, body: draft.body, authority: draft.authority, version: draft.version)
+        case .draft(let draft):
+            let photoFile = draft.photo.flatMap { savePhoto($0, named: "\(message.id.uuidString)-draft.jpg", in: folder) }
+            content = .draft(
+                subject: draft.subject, body: draft.body, authority: draft.authority, version: draft.version,
+                recipient: draft.recipient, language: draft.language, summaryDE: draft.summaryDE, photoFile: photoFile
+            )
         case .emergency: content = .emergency
         case .sanitized(let result):
             let file = result.photo.flatMap { savePhoto($0, named: "\(message.id.uuidString)-clean.jpg", in: folder) }
@@ -180,8 +185,11 @@ final class TicketStore {
         case .photo(let file, let caption): content = .photo(loadPhoto(file, in: folder) ?? UIImage(systemName: "photo") ?? UIImage(), caption: caption)
         case .status(let text): content = .status(text)
         case .question(let text, let options): content = .question(text, options: options)
-        case .draft(let subject, let body, let authority, let version):
-            content = .draft(ReportDraft(subject: subject, body: body, authority: authority, version: version))
+        case .draft(let subject, let body, let authority, let version, let recipient, let language, let summaryDE, let photoFile):
+            content = .draft(ReportDraft(
+                subject: subject, body: body, authority: authority, version: version, recipient: recipient,
+                language: language, summaryDE: summaryDE, photo: loadPhoto(photoFile, in: folder)
+            ))
         case .emergency: content = .emergency
         case .sanitized(let text, let photoFile, let changes):
             content = .sanitized(SanitizedResult(text: text, photo: loadPhoto(photoFile, in: folder), changes: changes))

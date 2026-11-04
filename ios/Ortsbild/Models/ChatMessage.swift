@@ -16,7 +16,32 @@ struct ReportDraft {
     let body: String
     let authority: String
     let version: Int
+    /// How to reach the authority, e.g. "E-Mail: tiefbau@muenchen.de". `nil` if none was found.
+    var recipient: String? = nil
+    /// The language of the letter (two letters). `nil` for the scripted drafts of the mock.
+    var language: String? = nil
+    /// One sentence in German about what the letter says, for a letter in a language the user may not read.
+    var summaryDE: String? = nil
+    /// The cleaned photo that goes with the letter.
+    var photo: UIImage? = nil
     // TODO: Show user_addendum (user additions) separately from the factual part
+
+    /// The letter as one text for the share sheet: to whom, the subject and the body.
+    var shareText: String {
+        var lines: [String] = []
+        if let recipient { lines.append("An: \(authority) (\(recipient))") }
+        lines.append("Betreff: \(subject)")
+        lines.append("")
+        lines.append(body)
+        return lines.joined(separator: "\n")
+    }
+
+    /// What the share sheet gets: the text and, if there is one, the photo.
+    var shareItems: [Any] {
+        var items: [Any] = [shareText]
+        if let photo { items.append(photo) }
+        return items
+    }
 }
 
 /// Actions of the approval pause (see docs/documentation.md: approve, revise, wrong authority, close).

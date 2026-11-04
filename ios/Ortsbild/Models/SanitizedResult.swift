@@ -18,10 +18,29 @@ nonisolated struct ReportResponse: Decodable, Sendable {
     let classification: ClassificationDTO?
     /// `nil` if no responsible authority was found (or the report is no defect, or an emergency).
     let research: ResearchDTO?
+    /// The message for the user to approve. `nil` if none was written (no defect, an emergency, or the writing failed).
+    let draft: DraftDTO?
 
     enum CodingKeys: String, CodingKey {
-        case id, status, reason, report, classification, research
+        case id, status, reason, report, classification, research, draft
         case photoUrls = "photo_urls"
+    }
+}
+
+/// The draft as the backend wrote it: the text of the model plus the location, written by the server.
+nonisolated struct DraftDTO: Decodable, Sendable {
+    let subject: String
+    let body: String
+    let summaryDe: String
+    /// Two letters, the language of the authority's place.
+    let language: String
+    let authority: String?
+    let contact: ChannelDTO?
+    let version: Int
+
+    enum CodingKeys: String, CodingKey {
+        case subject, body, language, authority, contact, version
+        case summaryDe = "summary_de"
     }
 }
 

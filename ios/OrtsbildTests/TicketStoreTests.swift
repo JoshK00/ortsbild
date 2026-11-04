@@ -65,6 +65,47 @@ struct TicketStoreTests {
         guard case .emergency = loaded[7].content else { Issue.record("emergency lost"); return }
     }
 
+    @Test func aDraftKeepsItsContactLanguageSummaryAndPhoto() throws {
+        let (store, _) = makeStore()
+        let id = UUID()
+        let draft = ReportDraft(
+            subject: "Pothole on the cycle path", body: "Dear Sir or Madam", authority: "Roads department", version: 1,
+            recipient: "E-Mail: roads@example.org", language: "en", summaryDE: "Meldung eines Schlaglochs.", photo: image(.green)
+        )
+        store.save([ChatMessage(sender: .user, content: .text("x")), ChatMessage(sender: .agent, content: .draft(draft))], for: id)
+
+        let loaded = try #require(store.loadMessages(for: id))
+        guard case .draft(let back) = loaded[1].content else { Issue.record("draft lost"); return }
+        #expect(back.recipient == "E-Mail: roads@example.org" && back.language == "en" && back.summaryDE == "Meldung eines Schlaglochs.")
+        #expect(back.photo != nil && back.authority == "Roads department")
+    }
+
+    @Test func aDraftWrittenBeforeTheNewFieldsCanStillBeRead() throws {
+        let (store, root) = makeStore()
+        let id = UUID()
+        store.save([ChatMessage(sender: .user, content: .text("x"))], for: id)
+        // The format of the history before the draft had a contact, a language, a summary and a photo
+        let old = """
+        [{"id":"\(UUID().uuidString)","sender":"user","date":"2026-11-04T09:00:00Z","content":{"text":{"_0":"x"}}},
+         {"id":"\(UUID().uuidString)","sender":"agent","date":"2026-11-04T09:00:05Z",
+          "content":{"draft":{"subject":"Betreff","body":"Text","authority":"Tiefbauamt","version":2}}}]
+        """
+        try Data(old.utf8).write(to: root.appending(path: id.uuidString).appending(path: "messages.json"))
+
+        let loaded = try #require(store.loadMessages(for: id))
+        guard case .draft(let draft) = loaded[1].content else { Issue.record("old draft lost"); return }
+        #expect(draft.subject == "Betreff" && draft.version == 2)
+        #expect(draft.recipient == nil && draft.language == nil && draft.summaryDE == nil && draft.photo == nil)
+    }
+
+    @Test func theShareTextHasTheRecipientTheSubjectAndTheBodyAndTheSharedItemsHaveThePhoto() {
+        let draft = ReportDraft(subject: "Betreff", body: "Text", authority: "Tiefbauamt", version: 1, recipient: "E-Mail: a@b.de", photo: image())
+        #expect(draft.shareText == "An: Tiefbauamt (E-Mail: a@b.de)\nBetreff: Betreff\n\nText")
+        #expect(draft.shareItems.count == 2)
+        let without = ReportDraft(subject: "Betreff", body: "Text", authority: "Empfänger noch offen", version: 1)
+        #expect(without.shareText == "Betreff: Betreff\n\nText" && without.shareItems.count == 1)
+    }
+
     @Test func theTicketListIsKeptAcrossRestartsAndSortedByTheLastChange() {
         let (store, root) = makeStore()
         let older = UUID(), newer = UUID()
