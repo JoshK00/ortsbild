@@ -16,10 +16,37 @@ nonisolated struct ReportResponse: Decodable, Sendable {
     let photoUrls: [String]
     /// `nil` if the classification failed, the report is classified later.
     let classification: ClassificationDTO?
+    /// `nil` if no responsible authority was found (or the report is no defect, or an emergency).
+    let research: ResearchDTO?
 
     enum CodingKeys: String, CodingKey {
-        case id, status, reason, report, classification
+        case id, status, reason, report, classification, research
         case photoUrls = "photo_urls"
+    }
+}
+
+/// The responsible authority as the backend found it. A suggestion: the user checks it.
+nonisolated struct ResearchDTO: Decodable, Sendable {
+    let authority: String
+    let channel: ChannelDTO?
+    let sources: [String]
+    /// 0 to 1, how sure the research is.
+    let confidence: Double
+    /// `registry` (an earlier answer) or `web` (found just now).
+    let origin: String
+}
+
+nonisolated struct ChannelDTO: Decodable, Sendable {
+    /// `email`, `web_form` or `open311`.
+    let type: String
+    let target: String
+
+    var kindName: String {
+        switch type {
+        case "email": "E-Mail"
+        case "web_form": "Formular"
+        default: "Meldeportal"
+        }
     }
 }
 

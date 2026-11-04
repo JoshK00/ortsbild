@@ -13,6 +13,7 @@ import UIKit
 struct BackendReportService: ReportService {
     let client: BackendClient
     private let location = LocationService()
+    private let places = PlaceService()
     /// The steps after the privacy layer (category, follow-up question, draft) are not built on the server yet.
     // TODO: Replace with the real backend steps once classification, research and drafting exist.
     private let laterSteps = MockReportService()
@@ -59,6 +60,10 @@ struct BackendReportService: ReportService {
             return
         }
 
+        // The address of the position, from the phone. Without it the report still works, only no authority is researched.
+        let place = await places.place(for: position)
+        if let place { emit(.status("Ort erkannt: \(place.line)")) }
+
         var jpeg: Data?
         if let photo {
             guard let data = photo.jpegForUpload() else {
@@ -72,7 +77,7 @@ struct BackendReportService: ReportService {
         // One id per report: if the answer gets lost and we send again, the server does not create a second report
         let clientReportID = UUID().uuidString
         do {
-            let response = try await sendWithOneRetry(clientReportID: clientReportID, position: position, text: text, jpeg: jpeg)
+            let response = try await sendWithOneRetry(clientReportID: clientReportID, position: position, place: place, text: text, jpeg: jpeg)
             await present(response, emit: emit)
         } catch BackendError.notSignedIn {
             emit(.text("Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an."))
@@ -83,13 +88,14 @@ struct BackendReportService: ReportService {
         }
     }
 
-    private func sendWithOneRetry(clientReportID: String, position: CLLocation, text: String?, jpeg: Data?) async throws -> ReportResponse {
+    private func sendWithOneRetry(clientReportID: String, position: CLLocation, place: Place?, text: String?, jpeg: Data?) async throws -> ReportResponse {
         func send() async throws -> ReportResponse {
             try await client.sendReport(
                 clientReportID: clientReportID,
                 latitude: position.coordinate.latitude,
                 longitude: position.coordinate.longitude,
                 accuracy: position.horizontalAccuracy,
+                place: place,
                 text: text,
                 jpeg: jpeg
             )
@@ -101,6 +107,19 @@ struct BackendReportService: ReportService {
             try await Task.sleep(for: .seconds(2))
             return try await send()
         }
+    }
+
+    /// The suggested authority with its contact and the sources, or the honest note that none was found.
+    private func authorityText(_ research: ResearchDTO?) -> String {
+        guard let research else {
+            // TODO: Let the user enter the recipient by hand, the draft step will need it
+            return "Ich konnte keine zuständige Stelle finden. Das Eintragen von Hand folgt in einer späteren Version."
+        }
+        var lines = ["Zuständige Stelle (Vorschlag, bitte prüfen):", research.authority]
+        if let channel = research.channel { lines.append("\(channel.kindName): \(channel.target)") }
+        // Where the answer comes from, so the user can check it
+        lines.append(contentsOf: research.sources.prefix(2).map { "Quelle: \($0)" })
+        return lines.joined(separator: "\n")
     }
 
     private func present(_ response: ReportResponse, emit: (ChatContent) -> Void) async {
@@ -127,6 +146,7 @@ struct BackendReportService: ReportService {
             }
             let sure = classification.isUnsure ? ", unsicher" : ""
             emit(.status("Kategorie: \(classification.categoryName) (\(Int((classification.confidence * 100).rounded())) %\(sure)), \(classification.laneName)"))
+            emit(.text(authorityText(response.research)))
             emit(.text("So sieht deine Meldung aus, nachdem alles Persönliche entfernt wurde. Der Entwurf an die Behörde folgt in einer späteren Version."))
         case "rejected":
             if response.reason == "too_many_faces" {

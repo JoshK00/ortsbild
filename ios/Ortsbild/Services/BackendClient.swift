@@ -66,12 +66,23 @@ actor BackendClient {
 
     /// Sends a report. The same `clientReportID` can be sent again after a lost answer, the server
     /// then returns the first result and creates no second report.
-    func sendReport(clientReportID: String, latitude: Double, longitude: Double, accuracy: Double?, text: String?, jpeg: Data?) async throws -> ReportResponse {
+    func sendReport(clientReportID: String, latitude: Double, longitude: Double, accuracy: Double?, place: Place?, text: String?, jpeg: Data?) async throws -> ReportResponse {
         var form = MultipartForm()
         form.addField("client_report_id", clientReportID)
         form.addField("lat", String(latitude))
         form.addField("lon", String(longitude))
         if let accuracy, accuracy >= 0 { form.addField("accuracy_m", String(accuracy)) }
+        if let place {
+            // The user may have corrected these, the backend treats them as untrusted text and limits their length
+            let parts = [
+                ("country_code", place.countryCode), ("state", place.state), ("municipality", place.municipality),
+                ("district", place.district), ("postal_code", place.postalCode), ("street", place.street),
+                ("house_number", place.houseNumber),
+            ]
+            for (name, value) in parts {
+                if let value, !value.isEmpty { form.addField(name, String(value.prefix(120))) }
+            }
+        }
         if let text { form.addField("text", text) }
         if let jpeg { form.addFile("photo", filename: "photo.jpg", mimeType: "image/jpeg", data: jpeg) }
 
