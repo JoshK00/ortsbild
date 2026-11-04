@@ -17,3 +17,4 @@ psycopg[binary]
 python-dotenv
 python-multipart
 pyjwt[crypto]
+anthropic

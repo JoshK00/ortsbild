@@ -3,6 +3,7 @@ import time
 from collections.abc import Callable
 from typing import TypeVar
 
+import anthropic
 import botocore.exceptions
 import httpx
 import psycopg
@@ -26,12 +27,13 @@ def is_transient_error(error: Exception) -> bool:
             psycopg.OperationalError,  # database not reachable (also a wrong password, retrying is harmless)
             botocore.exceptions.ConnectionError,
             botocore.exceptions.HTTPClientError,
+            anthropic.APIConnectionError,  # also the timeouts of the Anthropic client
         ),
     ):
         return True
-    if isinstance(error, httpx.HTTPStatusError):  # an API answered 429 or 5xx
-        return error.response.status_code >= 500 or error.response.status_code == 429
-    status = getattr(error, "status", None)  # e.g. the storage API error
+    status = getattr(error, "status_code", None)  # the Anthropic API errors (429 rate limit, 5xx, 529 overloaded)
+    if status is None:
+        status = getattr(error, "status", None)  # e.g. the storage API error
     response = getattr(error, "response", None)  # boto3 ClientError
     if status is None and isinstance(response, dict):
         status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")

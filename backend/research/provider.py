@@ -37,11 +37,13 @@ def provider_from_env() -> ResearchProvider | None:
     name = os.getenv("RESEARCH_PROVIDER", "none")
     if name == "none":
         return None
-    if name == "mistral":
+    if name == "anthropic":
+        from research.claude import DEFAULT_MODEL, ClaudeSearchProvider
         from research.fetcher import SafeFetcher
-        from research.mistral import DEFAULT_MODEL, MistralSearchProvider
         from research.verify import VerifiedProvider
 
         # Every answer is checked against the pages it names before it is used
-        return VerifiedProvider(MistralSearchProvider(os.environ["MISTRAL_KEY"], os.getenv("MISTRAL_RESEARCH_MODEL", DEFAULT_MODEL)), SafeFetcher())
+        return VerifiedProvider(
+            ClaudeSearchProvider(os.environ["ANTHROPIC_API_KEY"], os.getenv("ANTHROPIC_RESEARCH_MODEL", DEFAULT_MODEL)), SafeFetcher()
+        )
     raise ValueError(f"unknown RESEARCH_PROVIDER: {name}")

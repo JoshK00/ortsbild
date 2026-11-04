@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from classification.models import Classification
-from classification.service import Classifier
 from models.sanitized_report import RedactionLog, SanitizedReport
 from privacy.photo_store import InMemoryPhotoStore
 
@@ -35,7 +34,7 @@ def run_cases(
     """Run every case through the classifier, the same path as in production (retry, keyword search).
 
     `classifier_for_store` is a function that gets the in-memory photo store of one case and returns the classifier.
-    `pause_seconds` waits between two cases, for providers that throttle (the free tier of Mistral).
+    `pause_seconds` waits between two cases, for providers that throttle (a rate limit).
     """
     results = []
     for number, case in enumerate(cases):

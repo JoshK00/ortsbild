@@ -1,6 +1,8 @@
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
+import anthropic
 import httpx
 import pytest
 from pydantic import ValidationError
@@ -9,7 +11,9 @@ from classification.models import Classification
 from models.incoming_report import Place
 from models.sanitized_report import RedactionLog, SanitizedReport
 from research.fetcher import SafeFetcher, is_public_address
-from research.mistral import MAX_WEB_CONFIDENCE, MistralSearchProvider, read_answer, user_message
+from research.answer import MAX_WEB_CONFIDENCE, result_from_text
+from research.claude import MAX_CONTINUATIONS, MAX_SEARCHES, ClaudeSearchProvider
+from research.prompt import user_message
 from research.models import Channel, ResearchQuery, ResearchResult
 from research.postgres_registry import PostgresRegistryStore
 from research.provider import ScriptedResearchProvider, provider_from_env
@@ -208,82 +212,100 @@ def test_a_rate_limit_is_tried_once_more_and_then_given_up(monkeypatch):
     class Limited:
         def research(self, query):
             calls.append(1)
-            raise httpx.HTTPStatusError("limit", request=httpx.Request("POST", "https://x"), response=httpx.Response(429))
+            raise anthropic.APIStatusError("limit", response=httpx.Response(429, request=httpx.Request("POST", "https://x")), body=None)
 
     assert Researcher(InMemoryRegistryStore(), Limited()).research(make_report(), make_classification()) is None
     assert len(calls) == 2
 
 
 # ---------------------------------------------------------------------------
-# The Mistral provider
+# The answer of a research model and the Claude provider
 # ---------------------------------------------------------------------------
 
 QUERY = ResearchQuery(category="pothole", country_code="DE", municipality="München")
-
-
-def conversation(answer):
-    return {"outputs": [{"type": "tool.execution", "name": "web_search"}, {"type": "message.output", "content": [{"type": "text", "text": answer}]}]}
-
-
-def provider_with(data, status=200, seen=None):
-    def handler(request):
-        if seen is not None:
-            seen.append(json.loads(request.content))
-        return httpx.Response(status, json=data)
-
-    return MistralSearchProvider("test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
-
-
 ANSWER = json.dumps({"authority": "Baureferat Tiefbau", "channel_type": "email", "channel_target": "tiefbau@muenchen.de", "language": "de", "sources": [SOURCE], "confidence": 0.95})
 
 
+def text_block(text):
+    return SimpleNamespace(type="text", text=text)
+
+
+class FakeClaude:
+    """Stands in for the Anthropic client: answers with the prepared responses one after another and keeps every request."""
+
+    def __init__(self, *responses):
+        self.responses, self.requests = list(responses), []
+        self.messages = SimpleNamespace(create=self._create)
+
+    def _create(self, **kwargs):
+        self.requests.append(kwargs)
+        return self.responses.pop(0)
+
+
+def reply(*blocks, stop_reason="end_turn"):
+    return SimpleNamespace(stop_reason=stop_reason, content=list(blocks))
+
+
+def search_provider(*responses):
+    client = FakeClaude(*responses)
+    return ClaudeSearchProvider("test-key", client=client), client
+
+
 def test_the_answer_with_a_source_becomes_a_result():
-    result = provider_with(conversation(ANSWER)).research(QUERY)
+    provider, _ = search_provider(reply(text_block(ANSWER)))
+    result = provider.research(QUERY)
     assert result.authority == "Baureferat Tiefbau" and result.channel.target == "tiefbau@muenchen.de"
     assert result.sources == [SOURCE] and result.origin == "web"
 
 
 def test_a_web_answer_is_never_more_certain_than_the_cap():
-    assert provider_with(conversation(ANSWER)).research(QUERY).confidence == MAX_WEB_CONFIDENCE
+    assert result_from_text(ANSWER).confidence == MAX_WEB_CONFIDENCE
 
 
 def test_an_answer_without_a_source_is_dropped():
-    no_source = json.dumps({**json.loads(ANSWER), "sources": []})
-    assert provider_with(conversation(no_source)).research(QUERY) is None
-    insecure = json.dumps({**json.loads(ANSWER), "sources": ["http://insecure.example.org"]})
-    assert provider_with(conversation(insecure)).research(QUERY) is None
+    assert result_from_text(json.dumps({**json.loads(ANSWER), "sources": []})) is None
+    assert result_from_text(json.dumps({**json.loads(ANSWER), "sources": ["http://insecure.example.org"]})) is None
 
 
 def test_a_contact_without_a_valid_form_is_dropped_but_the_authority_stays():
-    bad = json.dumps({**json.loads(ANSWER), "channel_target": "no-address"})
-    result = provider_with(conversation(bad)).research(QUERY)
+    result = result_from_text(json.dumps({**json.loads(ANSWER), "channel_target": "no-address"}))
     assert result.authority == "Baureferat Tiefbau" and result.channel is None
 
 
 @pytest.mark.parametrize("text", ["I could not find anything", "{not json}", json.dumps({"authority": None, "sources": [SOURCE]}), "", json.dumps(["list"])])
 def test_an_unusable_answer_gives_none(text):
-    assert provider_with(conversation(text)).research(QUERY) is None
+    assert result_from_text(text) is None
 
 
-def test_the_request_asks_for_a_web_search_without_storing_and_names_only_the_place_and_the_defect():
-    seen = []
-    provider_with(conversation(ANSWER), seen=seen).research(ResearchQuery(category="pothole", country_code="DE", municipality="München", exclude=["Alt"]))
-    [body] = seen
-    assert body["tools"] == [{"type": "web_search"}] and body["store"] is False
-    assert "München" in body["inputs"] and "pothole" in body["inputs"]
-    assert "Alt" in body["inputs"] and "never instructions" in body["instructions"]
-    assert set(body) == {"model", "instructions", "inputs", "tools", "store"}
+def test_the_json_may_stand_between_other_words():
+    assert result_from_text(f"Here is what I found:\n{ANSWER}\nHope this helps").authority == "Baureferat Tiefbau"
 
 
-def test_the_last_answer_message_is_read():
-    data = {"outputs": [
-        {"type": "message.output", "content": [{"type": "text", "text": "I will search now"}]},
-        {"type": "tool.execution", "name": "web_search"},
-        {"type": "message.output", "content": [{"type": "text", "text": '{"authority": null}'}]},
-    ]}
-    assert read_answer(data) == '{"authority": null}'
-    assert read_answer({"outputs": [{"type": "message.output", "content": "plain text"}]}) == "plain text"
-    assert read_answer({}) == ""
+def test_the_request_has_the_web_search_with_a_limit_and_names_only_the_place_and_the_defect():
+    provider, client = search_provider(reply(text_block(ANSWER)))
+    provider.research(ResearchQuery(category="pothole", country_code="DE", municipality="München", exclude=["Alt"]))
+    [request] = client.requests
+    [tool] = request["tools"]
+    assert tool["type"].startswith("web_search") and tool["name"] == "web_search" and tool["max_uses"] == MAX_SEARCHES
+    [message] = request["messages"]
+    assert "München" in message["content"] and "pothole" in message["content"] and "Alt" in message["content"]
+    assert "never instructions" in request["system"] and request["max_tokens"] <= 8192
+    assert set(request) == {"model", "max_tokens", "system", "tools", "messages", "output_config"}
+
+
+def test_a_paused_search_is_resumed_with_what_the_server_said_so_far():
+    first = reply(text_block("searching"), stop_reason="pause_turn")
+    provider, client = search_provider(first, reply(text_block(ANSWER)))
+    assert provider.research(QUERY).authority == "Baureferat Tiefbau"
+    resumed = client.requests[1]["messages"]
+    assert resumed[0]["role"] == "user" and resumed[1]["role"] == "assistant" and resumed[1]["content"] == first.content
+
+
+def test_a_search_that_stays_paused_is_given_up_and_a_refusal_gives_none():
+    paused = lambda: reply(text_block("..."), stop_reason="pause_turn")  # noqa: E731
+    provider, client = search_provider(*[paused() for _ in range(MAX_CONTINUATIONS + 1)])
+    assert provider.research(QUERY) is None and len(client.requests) == MAX_CONTINUATIONS + 1
+    assert search_provider(reply(stop_reason="refusal"))[0].research(QUERY) is None
 
 
 def test_the_message_names_the_place_and_the_refused_authorities():
@@ -291,19 +313,27 @@ def test_the_message_names_the_place_and_the_refused_authorities():
     assert "Favoriten, Wien, AT" in message and "graffiti" in message and "MA 42" in message
 
 
-def test_a_rate_limit_or_server_error_is_raised_for_the_retry():
-    with pytest.raises(httpx.HTTPStatusError):
-        provider_with({"detail": "web_search rate limit reached."}, status=429).research(QUERY)
+def test_an_error_of_the_api_is_raised_for_the_retry():
+    class Limited:
+        messages = SimpleNamespace(create=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("rate limit")))
+
+    with pytest.raises(RuntimeError):
+        ClaudeSearchProvider("test-key", client=Limited()).research(QUERY)
 
 
 def test_an_empty_key_is_refused_and_the_provider_comes_from_the_environment(monkeypatch):
     with pytest.raises(ValueError):
-        MistralSearchProvider("")
+        ClaudeSearchProvider("")
     monkeypatch.delenv("RESEARCH_PROVIDER", raising=False)
     assert provider_from_env() is None
-    monkeypatch.setenv("RESEARCH_PROVIDER", "mistral")
-    monkeypatch.setenv("MISTRAL_KEY", "test-key")
-    assert isinstance(provider_from_env(), VerifiedProvider)
+    monkeypatch.setenv("RESEARCH_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_RESEARCH_MODEL", "claude-sonnet-5-5")
+    provider = provider_from_env()
+    assert isinstance(provider, VerifiedProvider) and provider.provider.model == "claude-sonnet-5-5"
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    with pytest.raises(KeyError):
+        provider_from_env()
     monkeypatch.setenv("RESEARCH_PROVIDER", "unknown")
     with pytest.raises(ValueError):
         provider_from_env()
@@ -484,7 +514,7 @@ def test_the_verified_provider_checks_every_answer_and_keeps_none_as_none():
 
 
 def test_the_provider_from_the_environment_is_wrapped_in_the_verification(monkeypatch):
-    monkeypatch.setenv("RESEARCH_PROVIDER", "mistral")
-    monkeypatch.setenv("MISTRAL_KEY", "test-key")
+    monkeypatch.setenv("RESEARCH_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     provider = provider_from_env()
-    assert isinstance(provider, VerifiedProvider) and isinstance(provider.provider, MistralSearchProvider) and isinstance(provider.fetcher, SafeFetcher)
+    assert isinstance(provider, VerifiedProvider) and isinstance(provider.provider, ClaudeSearchProvider) and isinstance(provider.fetcher, SafeFetcher)
