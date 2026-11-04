@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-Status = Literal["processing", "sanitized", "classified", "researched", "drafted", "blocked_privacy", "rejected"]
+Status = Literal["processing", "sanitized", "classified", "needs_input", "researched", "drafted", "blocked_privacy", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,14 @@ class ReportStatusStore(Protocol):
         ...
 
     def save_sanitized(self, report_id: str, sanitized: dict) -> None: ...
+
+    def start_answer(self, report_id: str) -> bool:
+        """The user answers the open question: move the report from `needs_input` back to `classified`.
+
+        True if it was waiting for an answer. False if not, or if another answer came first, so the research
+        and the draft are started only once (the check and the change are one step).
+        """
+        ...
 
     def save_classification(self, report_id: str, classification: dict) -> None:
         """Keep the classification and move the report to the status `classified`."""
@@ -109,6 +117,13 @@ class InMemoryReportStatusStore:
 
     def save_sanitized(self, report_id: str, sanitized: dict) -> None:
         self.sanitized[report_id] = sanitized
+
+    def start_answer(self, report_id: str) -> bool:
+        row = self.rows.get(report_id)
+        if row is None or row.status != "needs_input":
+            return False
+        self.rows[report_id] = ReportStatusRow(report_id, "classified", row.source_type, row.block_reason)
+        return True
 
     def save_classification(self, report_id: str, classification: dict) -> None:
         self.classifications[report_id] = classification

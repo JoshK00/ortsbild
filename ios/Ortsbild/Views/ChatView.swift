@@ -127,7 +127,7 @@ private struct MessageRow: View {
             PhotoBubble(image: image, caption: caption)
         case .status(let text):
             StatusRow(text: text)
-        case .question(let text, let options):
+        case .clarification(_, let text, let options), .question(let text, let options):
             VStack(alignment: .leading, spacing: 8) {
                 MessageBubble(sender: .agent, text: text)
                 QuickReplyBar(options: options, isEnabled: isActive, onSelect: onOption)

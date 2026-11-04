@@ -28,6 +28,7 @@ class ReportState(TypedDict, total=False):
     classification: Classification | None  # None if the classification failed, it is repeated later
     research: ResearchResult | None  # None if no authority was found, the user adds the recipient
     draft: Draft | None  # None if no draft was written (no defect, or the provider failed)
+    needs_input: bool  # True if the picture was not clear and the user is asked, nothing is researched or drafted
 
 
 def make_privacy_node(privacy_graph, status_store: ReportStatusStore):
@@ -82,10 +83,33 @@ def make_draft_node(drafter: Drafter, status_store: ReportStatusStore):
     return draft_node
 
 
-def after_classify(state: ReportState) -> str:
-    """Only a classified report that is no emergency is researched. An emergency gets the hint to call 110 / 112, no ticket."""
-    classification = state.get("classification")
-    return "research" if classification is not None and not classification.emergency else END
+def needs_clarification(classification: Classification, min_confidence: float) -> bool:
+    """True if the classification is not sure enough to go on: the picture shows no defect we know, or the model doubts."""
+    return classification.category == "other" or classification.confidence < min_confidence
+
+
+def make_ask_node(status_store: ReportStatusStore):
+    """Stops the chain and waits for the answer of the user: no research and no draft on a guess."""
+
+    def ask_node(state: ReportState) -> dict:
+        report = state["sanitized_report"]
+        status_store.set_status(report.id, "needs_input", report.source_type)
+        return {"needs_input": True}
+
+    return ask_node
+
+
+def make_after_classify(min_confidence: float):
+    """The decision after the classification: an emergency stops (only the hint to call 110 / 112, no ticket), an unclear
+    picture is asked about, everything else is researched. No classification (the provider failed) stops as well."""
+
+    def after_classify(state: ReportState) -> str:
+        classification = state.get("classification")
+        if classification is None or classification.emergency:
+            return END
+        return "ask" if needs_clarification(classification, min_confidence) else "research"
+
+    return after_classify
 
 
 def after_privacy(state: ReportState) -> str:
@@ -94,7 +118,8 @@ def after_privacy(state: ReportState) -> str:
 
 
 def build_report_graph(
-    privacy_graph, classifier: Classifier, researcher: Researcher, drafter: Drafter, status_store: ReportStatusStore
+    privacy_graph, classifier: Classifier, researcher: Researcher, drafter: Drafter, status_store: ReportStatusStore,
+    min_confidence: float = 0.6,
 ):
     """The orchestrator: the stages of one report, in order.
 
@@ -107,8 +132,22 @@ def build_report_graph(
     graph.add_edge(START, "privacy")
     graph.add_conditional_edges("privacy", after_privacy, {"classify": "classify", END: END})
     graph.add_node("research", make_research_node(researcher, status_store))
-    graph.add_conditional_edges("classify", after_classify, {"research": "research", END: END})
+    graph.add_node("ask", make_ask_node(status_store))
+    graph.add_conditional_edges("classify", make_after_classify(min_confidence), {"research": "research", "ask": "ask", END: END})
+    graph.add_edge("ask", END)
     graph.add_node("draft", make_draft_node(drafter, status_store))
+    graph.add_edge("research", "draft")
+    graph.add_edge("draft", END)
+    return graph.compile()
+
+
+def build_followup_graph(researcher: Researcher, drafter: Drafter, status_store: ReportStatusStore):
+    """The rest of the chain for a report whose question was answered: it starts with the classification the user settled
+    and runs the research and the draft. The privacy layer and the classification already ran."""
+    graph = StateGraph(ReportState)
+    graph.add_node("research", make_research_node(researcher, status_store))
+    graph.add_node("draft", make_draft_node(drafter, status_store))
+    graph.add_edge(START, "research")
     graph.add_edge("research", "draft")
     graph.add_edge("draft", END)
     return graph.compile()

@@ -61,8 +61,11 @@ final class ChatViewModel {
     }
 
     func choose(option: String) {
+        // The question that is open names the report the answer belongs to
+        var reportID: String?
+        if case .clarification(let id, _, _)? = messages.last?.content { reportID = id }
         append(.user, .text(option))
-        run(service.answer(option))
+        run(service.answer(option, reportID: reportID))
     }
 
     func perform(_ action: DraftAction) {

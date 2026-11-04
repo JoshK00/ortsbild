@@ -9,6 +9,8 @@ Category = Literal["litter", "graffiti", "street_light", "playground_equipment",
 Lane = Literal["hazard", "nuisance"]
 
 CATEGORIES: tuple[str, ...] = Category.__args__
+# What the user can pick when the picture is not clear. "other" is no choice: it is the answer "nothing of these".
+CLARIFICATION_CATEGORIES: tuple[str, ...] = tuple(category for category in CATEGORIES if category != "other")
 
 
 class Classification(ContractModel):

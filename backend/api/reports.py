@@ -1,12 +1,15 @@
 import io
+import json
 import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
@@ -14,7 +17,9 @@ import privacy.photos  # noqa: F401  (registers the HEIC reader of Pillow)
 from auth.account import delete_account
 from auth.sessions import AuthManager
 from auth.tokens import AccessClaims
+from classification.models import CLARIFICATION_CATEGORIES, Classification
 from models.incoming_report import IncomingReport
+from models.sanitized_report import SanitizedReport
 from privacy.photo_store import PhotoStore
 from privacy.pseudonyms import PseudonymStore
 from privacy.report_status import ReportRecord, ReportStatusStore
@@ -38,6 +43,7 @@ class Services:
     """The parts the endpoints need. Tests pass fakes, production passes the real ones.
 
     `graph` is the orchestrator of the whole chain (privacy, classification, ...), see orchestrator/graph.py.
+    `followup_graph` runs the rest of it (research, draft) after the user answered a question.
     """
 
     graph: object
@@ -45,6 +51,7 @@ class Services:
     status_store: ReportStatusStore
     pseudonym_store: PseudonymStore
     auth: AuthManager
+    followup_graph: object | None = None
 
 
 def detect_image(data: bytes) -> tuple[str, str]:
@@ -78,19 +85,39 @@ def report_payload(record: ReportRecord) -> dict:
     if it does not exist (yet). A blocked report gets no reason (it is in the log and the status table).
     A rejected one gets a short code.
     """
-    empty = {"id": record.report_id, "report": None, "photo_urls": [], "classification": None, "research": None, "draft": None}
-    if record.status in ("sanitized", "classified", "researched", "drafted") and record.sanitized is not None:
+    empty = {
+        "id": record.report_id, "report": None, "photo_urls": [], "classification": None, "research": None, "draft": None,
+        "clarification": None,
+    }
+    if record.status in ("sanitized", "classified", "needs_input", "researched", "drafted") and record.sanitized is not None:
         photos = record.sanitized.get("photos", [])
         urls = [f"/v1/reports/{record.report_id}/photos/{photo['id']}" for photo in photos]
         return {
             "id": record.report_id, "status": "sanitized", "report": record.sanitized,
             "photo_urls": urls, "classification": record.classification, "research": record.research, "draft": record.draft,
+            "clarification": clarification_of(record),
         }
     if record.status == "blocked_privacy":
         return {**empty, "status": "blocked"}
     if record.status == "rejected":
         return {**empty, "status": "rejected", "reason": record.block_reason}
     return {**empty, "status": "processing"}
+
+
+def clarification_of(record: ReportRecord) -> dict | None:
+    """The open question for the user, or None. `reason` says why the picture could not be assigned, `options` is what can be picked."""
+    if record.status != "needs_input":
+        return None
+    unknown = (record.classification or {}).get("category") == "other"
+    return {"reason": "no_defect" if unknown else "unclear", "options": list(CLARIFICATION_CATEGORIES)}
+
+
+class AnswerBody(BaseModel):
+    """The answer to the question what the picture shows: one of the categories, nothing else."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: Literal[CLARIFICATION_CATEGORIES]  # type: ignore[valid-type]
 
 
 def create_reports_router(
@@ -182,6 +209,28 @@ def create_reports_router(
     @router.get("/reports/{report_id}")
     def get_report(report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)) -> JSONResponse:
         """The status and, when it is ready, the sanitized result of one of your reports."""
+        return JSONResponse(report_payload(own_report(report_id, user)))
+
+    @router.post("/reports/{report_id}/answer")
+    def answer_question(
+        body: AnswerBody, report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)
+    ) -> JSONResponse:
+        """The user says what the picture shows, after the question "what is this about?". The research and the draft follow.
+
+        The chosen category is the user's word, so it counts as sure (confidence 1). The lane and the emergency flag stay
+        what the model found. This works once: a second answer, or an answer to a report without a question, gets 409.
+        """
+        services = get_services()
+        record = own_report(report_id, user)
+        if record.status != "needs_input" or record.sanitized is None or record.classification is None:
+            raise HTTPException(409, "no question is open for this report")
+        if not services.status_store.start_answer(report_id):
+            raise HTTPException(409, "no question is open for this report")  # another answer was faster
+        sanitized = SanitizedReport.model_validate_json(json.dumps(record.sanitized))
+        asked = Classification.model_validate_json(json.dumps(record.classification))
+        chosen = Classification(category=body.category, lane=asked.lane, emergency=asked.emergency, confidence=1.0)
+        services.status_store.save_classification(report_id, chosen.model_dump(mode="json"))
+        services.followup_graph.invoke({"sanitized_report": sanitized, "classification": chosen})
         return JSONResponse(report_payload(own_report(report_id, user)))
 
     @router.get("/reports/{report_id}/photos/{photo_id}")

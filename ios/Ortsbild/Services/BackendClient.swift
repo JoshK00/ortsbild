@@ -91,6 +91,14 @@ actor BackendClient {
         return try JSONDecoder().decode(ReportResponse.self, from: data)
     }
 
+    /// The user's answer to the question what the picture shows. The server then researches the authority and writes the draft.
+    func answer(reportID: String, category: String) async throws -> ReportResponse {
+        let body = try JSONEncoder().encode(["category": category])
+        let (data, response) = try await authorized(path: "/v1/reports/\(reportID)/answer", method: "POST", body: body, contentType: "application/json")
+        guard response.statusCode == 200 else { throw BackendError.server(status: response.statusCode) }
+        return try JSONDecoder().decode(ReportResponse.self, from: data)
+    }
+
     /// The sanitized photo. `path` is what the server returned in `photo_urls`.
     func photo(path: String) async throws -> Data {
         let (data, response) = try await authorized(path: path, method: "GET")

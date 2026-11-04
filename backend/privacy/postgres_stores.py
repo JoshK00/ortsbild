@@ -111,6 +111,18 @@ class PostgresReportStatusStore:
 
         retry(run, "sanitized report save")
 
+    def start_answer(self, report_id: str) -> bool:
+        def run():
+            with self.connect(self.dsn) as connection:
+                # One statement: of two answers at the same moment only one finds the status `needs_input`
+                return connection.execute(
+                    "update reports set status = 'classified', updated_at = now() "
+                    "where id = %s and status = 'needs_input' returning id",
+                    (report_id,),
+                ).fetchone()
+
+        return retry(run, "answer start") is not None
+
     def save_classification(self, report_id: str, classification: dict) -> None:
         def run() -> None:
             with self.connect(self.dsn) as connection:

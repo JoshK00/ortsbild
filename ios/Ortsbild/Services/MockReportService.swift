@@ -25,7 +25,7 @@ struct MockReportService: ReportService {
         ])
     }
 
-    func answer(_ option: String) -> AsyncStream<ChatContent> {
+    func answer(_ option: String, reportID: String?) -> AsyncStream<ChatContent> {
         // TODO: The answer will later feed into classification and draft
         stream([
             (.status("Zuständige Stelle wird recherchiert"), 0.8),

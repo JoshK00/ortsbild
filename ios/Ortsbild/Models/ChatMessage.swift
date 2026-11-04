@@ -68,6 +68,8 @@ enum ChatContent {
     case sanitized(SanitizedResult)
     /// What the app is doing right now, for the activity bar. It is not a chat message and is never added to the chat.
     case activity(String)
+    /// The picture could not be assigned: a question with the answers as buttons. The report id says which report is asked about.
+    case clarification(reportID: String, text: String, options: [String])
 }
 
 struct ChatMessage: Identifiable {

@@ -29,9 +29,14 @@ struct BackendReportService: ReportService {
         }
     }
 
-    func answer(_ option: String) -> AsyncStream<ChatContent> {
-        // TODO: The backend asks no follow-up questions yet (docs/classification-plan.md, C7)
-        immediately([.text("Diese Antwort wird noch nicht ausgewertet.")])
+    func answer(_ option: String, reportID: String?) -> AsyncStream<ChatContent> {
+        AsyncStream { continuation in
+            let task = Task {
+                await runAnswer(option, reportID: reportID) { continuation.yield($0) }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     func perform(_ action: DraftAction) -> AsyncStream<ChatContent> {
@@ -143,6 +148,37 @@ struct BackendReportService: ReportService {
         return lines.joined(separator: "\n")
     }
 
+    /// The answer of the user to the question what the picture shows. The server then researches and drafts.
+    private func runAnswer(_ option: String, reportID: String?, emit: (ChatContent) -> Void) async {
+        guard let reportID else {
+            emit(.text("Diese Antwort wird noch nicht ausgewertet."))
+            return
+        }
+        guard let category = DefectCategory(title: option) else {
+            // "Keins davon": nothing to report, the report stays open on the server
+            // TODO: Close the report on the server too, today it stays "waiting for an answer"
+            emit(.text("Alles klar, dann kann ich hier nichts melden. Für ein anderes Problem startest du eine neue Meldung."))
+            return
+        }
+        emit(.activity("Zuständige Stelle wird gesucht und der Entwurf geschrieben"))
+        do {
+            let response = try await client.answer(reportID: reportID, category: category.rawValue)
+            let image = await cleanPhoto(of: response)
+            await continueAfterSanitized(response, image: image, chosenByUser: true, emit: emit)
+        } catch BackendError.notSignedIn {
+            emit(.text("Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an."))
+        } catch BackendError.server(status: 409) {
+            emit(.text("Auf diese Frage hast du schon geantwortet."))
+        } catch {
+            emit(.text("Die Antwort konnte nicht gesendet werden. Bitte prüfe deine Verbindung und versuche es erneut."))
+        }
+    }
+
+    private func cleanPhoto(of response: ReportResponse) async -> UIImage? {
+        guard let path = response.photoUrls.first, let data = try? await client.photo(path: path) else { return nil }
+        return UIImage(data: data)
+    }
+
     private func present(_ response: ReportResponse, emit: (ChatContent) -> Void) async {
         switch response.status {
         case "sanitized":
@@ -150,39 +186,9 @@ struct BackendReportService: ReportService {
                 emit(.text("Die Antwort des Servers war unvollständig. Bitte versuche es erneut."))
                 return
             }
-            var image: UIImage?
-            if let path = response.photoUrls.first, let data = try? await client.photo(path: path) {
-                image = UIImage(data: data)
-            }
+            let image = await cleanPhoto(of: response)
             emit(.sanitized(SanitizedResult(text: report.text, photo: image, entries: report.redactionLog.entries)))
-            guard let classification = response.classification else {
-                emit(.status("Die Kategorie konnte noch nicht bestimmt werden"))
-                emit(.text("Ohne Kategorie kann ich noch keinen Entwurf schreiben. Bitte versuche es später noch einmal."))
-                return
-            }
-            if classification.emergency {
-                // Only the hint, no ticket: in an emergency the police or the fire service must be called, not the city
-                emit(.emergency)
-                return
-            }
-            let sure = classification.isUnsure ? ", unsicher" : ""
-            emit(.status("Kategorie: \(classification.categoryName) (\(Int((classification.confidence * 100).rounded())) %\(sure)), \(classification.laneName)"))
-            emit(.text(authorityText(response.research)))
-            if let draft = response.draft {
-                emit(.draft(ReportDraft(
-                    subject: draft.subject,
-                    body: draft.body,
-                    authority: draft.authority ?? "Empfänger noch offen",
-                    version: draft.version,
-                    recipient: draft.contact.map { "\($0.kindName): \($0.target)" },
-                    language: draft.language,
-                    summaryDE: draft.summaryDe,
-                    photo: image
-                )))
-                emit(.text("Prüfe den Entwurf. Stimmen Stelle und Text, gib ihn frei."))
-            } else {
-                emit(.text("Ich konnte keinen Entwurf schreiben. Bitte versuche es später noch einmal."))
-            }
+            await continueAfterSanitized(response, image: image, chosenByUser: false, emit: emit)
         case "rejected":
             if response.reason == "too_many_faces" {
                 emit(.text("Auf dem Foto sind zu viele Personen zu sehen. Ich habe es nicht gespeichert. Bitte mach ein neues Foto von nahem, ohne Personen im Bild."))
@@ -195,4 +201,53 @@ struct BackendReportService: ReportService {
             emit(.text("Deine Meldung wird noch verarbeitet."))
         }
     }
+
+    /// What follows the cleaned report: the question if the picture is not clear, otherwise category, authority and draft.
+    /// `chosenByUser` is true after the user answered a question, then the category is their word and not a guess.
+    private func continueAfterSanitized(_ response: ReportResponse, image: UIImage?, chosenByUser: Bool, emit: (ChatContent) -> Void) async {
+        if let clarification = response.clarification {
+            // Nothing is researched on a guess: ask, and wait for the answer
+            let titles = clarification.options.compactMap { DefectCategory(rawValue: $0)?.title }
+            let text = clarification.reason == "no_defect"
+                ? "Ich erkenne hier keinen Mangel im öffentlichen Raum. Worum geht es?"
+                : "Ich bin mir nicht sicher, was gemeldet werden soll. Worum geht es?"
+            emit(.clarification(reportID: response.id, text: text, options: titles + [Self.noneOfThese]))
+            return
+        }
+        guard let classification = response.classification else {
+            emit(.status("Die Kategorie konnte noch nicht bestimmt werden"))
+            emit(.text("Ohne Kategorie kann ich noch keinen Entwurf schreiben. Bitte versuche es später noch einmal."))
+            return
+        }
+        if classification.emergency {
+            // Only the hint, no ticket: in an emergency the police or the fire service must be called, not the city
+            emit(.emergency)
+            return
+        }
+        if chosenByUser {
+            emit(.status("Kategorie: \(classification.categoryName) (von dir gewählt), \(classification.laneName)"))
+        } else {
+            let sure = classification.isUnsure ? ", unsicher" : ""
+            emit(.status("Kategorie: \(classification.categoryName) (\(Int((classification.confidence * 100).rounded())) %\(sure)), \(classification.laneName)"))
+        }
+        emit(.text(authorityText(response.research)))
+        if let draft = response.draft {
+            emit(.draft(ReportDraft(
+                subject: draft.subject,
+                body: draft.body,
+                authority: draft.authority ?? "Empfänger noch offen",
+                version: draft.version,
+                recipient: draft.contact.map { "\($0.kindName): \($0.target)" },
+                language: draft.language,
+                summaryDE: draft.summaryDe,
+                photo: image
+            )))
+            emit(.text("Prüfe den Entwurf. Stimmen Stelle und Text, gib ihn frei."))
+        } else {
+            emit(.text("Ich konnte keinen Entwurf schreiben. Bitte versuche es später noch einmal."))
+        }
+    }
+
+    /// The button for "none of these", handled in the app: there is nothing to report.
+    static let noneOfThese = "Keins davon"
 }

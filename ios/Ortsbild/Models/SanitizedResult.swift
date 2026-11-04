@@ -20,11 +20,21 @@ nonisolated struct ReportResponse: Decodable, Sendable {
     let research: ResearchDTO?
     /// The message for the user to approve. `nil` if none was written (no defect, an emergency, or the writing failed).
     let draft: DraftDTO?
+    /// Set if the picture could not be assigned and the user is asked. Nothing is researched or drafted until they answer.
+    let clarification: ClarificationDTO?
 
     enum CodingKeys: String, CodingKey {
-        case id, status, reason, report, classification, research, draft
+        case id, status, reason, report, classification, research, draft, clarification
         case photoUrls = "photo_urls"
     }
+}
+
+/// The open question: why the picture could not be assigned, and what the user can pick.
+nonisolated struct ClarificationDTO: Decodable, Sendable {
+    /// `unclear` (the model doubts) or `no_defect` (the picture shows none of the defects we know).
+    let reason: String
+    /// The codes of the categories, see `DefectCategory`.
+    let options: [String]
 }
 
 /// The draft as the backend wrote it: the text of the model plus the location, written by the server.
@@ -79,15 +89,7 @@ nonisolated struct ClassificationDTO: Decodable, Sendable {
 
     /// German name of the category for the chat.
     var categoryName: String {
-        switch category {
-        case "litter": "Müll"
-        case "graffiti": "Graffiti"
-        case "street_light": "Straßenbeleuchtung"
-        case "playground_equipment": "Spielgerät"
-        case "pothole": "Schlagloch"
-        case "tree": "Baum"
-        default: "Sonstiges"
-        }
+        DefectCategory(rawValue: category)?.title ?? "Sonstiges"
     }
 
     var laneName: String {

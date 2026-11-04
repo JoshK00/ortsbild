@@ -1,5 +1,6 @@
 import io
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -9,7 +10,7 @@ from classification.provider import RuleBasedProvider
 from classification.service import Classifier
 from drafting.provider import TemplateDraftProvider
 from drafting.service import Drafter
-from orchestrator.graph import build_report_graph
+from orchestrator.graph import build_followup_graph, build_report_graph
 from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
 from privacy.image_detectors import Box
@@ -44,7 +45,7 @@ class BrokenDetector:
 class Env:
     """The app with in-memory parts, and the parts to look into."""
 
-    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None, draft_provider=None):
+    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None, draft_provider=None, min_confidence=0.6):
         self.photo_store, self.status_store = InMemoryPhotoStore(), InMemoryReportStatusStore()
         self.pseudonym_store = InMemoryPseudonymStore("s")
         self.auth, self.token_store = make_auth_manager()
@@ -55,8 +56,9 @@ class Env:
         self.registry = InMemoryRegistryStore()
         researcher = Researcher(self.registry, research_provider)
         drafter = Drafter(draft_provider or TemplateDraftProvider())
-        graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), researcher, drafter, self.status_store)
-        services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth)
+        graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), researcher, drafter, self.status_store, min_confidence)
+        followup = build_followup_graph(researcher, drafter, self.status_store)
+        services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth, followup)
         self.client = TestClient(create_app(checks={}, services=services, api_key="k", configure_logging=False, reports_per_hour=reports_per_hour))
 
     def __enter__(self):
@@ -149,7 +151,7 @@ def test_text_report_is_sanitized_and_returned():
         assert response.status_code == 200 and body["status"] == "sanitized"
         assert body["report"]["text"] == "Pothole, call <PHONE>"
         assert body["report"]["pseudonym"].startswith("rep-")
-        assert env.status_store.rows[body["id"]].status == "classified"  # category other: no defect, so no research and no draft
+        assert env.status_store.rows[body["id"]].status == "needs_input"  # category other: the user is asked, nothing is researched
 
 
 def test_photo_report_returns_a_clean_photo_and_deletes_the_raw_one():
@@ -631,3 +633,152 @@ def test_deleting_the_account_removes_the_draft():
         env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE}, headers=headers)
         env.client.delete("/v1/account", headers=headers)
     assert env.status_store.drafts == {}
+
+
+# ---------------------------------------------------------------------------
+# A picture that cannot be assigned: the user is asked, nothing is researched on a guess
+# ---------------------------------------------------------------------------
+
+from classification.models import CLARIFICATION_CATEGORIES, Classification  # noqa: E402
+
+
+class FixedClassification:
+    """A classification provider that always gives the same answer."""
+
+    def __init__(self, **values):
+        self.values = {"category": "pothole", "lane": "hazard", "emergency": False, "confidence": 0.3, **values}
+
+    def classify(self, data):
+        return Classification(**self.values)
+
+
+def unsure(**values):
+    """An environment whose classification doubts, with a recording research and draft provider."""
+    research, draft = ScriptedResearchProvider(FOUND), RecordingDraftProvider()
+    return Env(provider=FixedClassification(**values), research_provider=research, draft_provider=draft), research, draft
+
+
+def test_an_unsure_classification_asks_and_researches_and_drafts_nothing():
+    env, research, draft = unsure(confidence=0.3)
+    with env:
+        body = env.post({"text": "Etwas liegt auf der Straße", **PLACE}).json()
+    assert body["status"] == "sanitized" and body["classification"]["confidence"] == 0.3
+    assert body["clarification"] == {"reason": "unclear", "options": list(CLARIFICATION_CATEGORIES)}
+    assert body["research"] is None and body["draft"] is None
+    assert research.queries == [] and draft.seen == []
+    assert env.status_store.rows[body["id"]].status == "needs_input"
+
+
+def test_a_picture_without_a_known_defect_asks_as_well():
+    env, research, draft = unsure(category="other", confidence=0.95)
+    with env:
+        body = env.post({"text": "Mein Hund im Park", **PLACE}).json()
+    assert body["clarification"]["reason"] == "no_defect" and research.queries == [] and draft.seen == []
+
+
+def test_a_sure_classification_asks_nothing_and_goes_on():
+    env, research, _ = unsure(confidence=0.9)
+    with env:
+        body = env.post({"text": "Großes Schlagloch", **PLACE}).json()
+    assert body["clarification"] is None and body["research"] is not None and body["draft"] is not None and len(research.queries) == 1
+
+
+def test_the_threshold_is_the_one_that_was_set():
+    with Env(provider=FixedClassification(confidence=0.7), min_confidence=0.8) as env:
+        assert env.post({"text": "x", **PLACE}).json()["clarification"] is not None
+    with Env(provider=FixedClassification(confidence=0.7), min_confidence=0.6) as env:
+        assert env.post({"text": "x", **PLACE}).json()["clarification"] is None
+
+
+def test_an_emergency_is_not_asked_about_even_if_unsure():
+    env, research, _ = unsure(confidence=0.2, emergency=True)
+    with env:
+        body = env.post({"text": "Etwas ist passiert", **PLACE}).json()
+    assert body["classification"]["emergency"] is True and body["clarification"] is None and research.queries == []
+
+
+def test_a_failed_classification_is_not_asked_about_and_nothing_is_researched():
+    class Broken:
+        def classify(self, data):
+            raise RuntimeError("model down")
+
+    research = ScriptedResearchProvider(FOUND)
+    with Env(provider=Broken(), research_provider=research) as env:
+        body = env.post({"text": "Großes Schlagloch", **PLACE}).json()
+    assert body["classification"] is None and body["clarification"] is None and body["research"] is None and research.queries == []
+
+
+def test_the_answer_runs_the_research_and_the_draft_with_the_category_of_the_user():
+    env, research, draft = unsure(confidence=0.3, lane="hazard")
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt auf der Straße", **PLACE}, headers=headers).json()
+        response = env.client.post(f"/v1/reports/{asked['id']}/answer", json={"category": "graffiti"}, headers=headers)
+    body = response.json()
+    assert response.status_code == 200 and body["clarification"] is None
+    assert body["classification"] == {"category": "graffiti", "lane": "hazard", "emergency": False, "confidence": 1.0}
+    assert body["research"]["authority"] == "Baureferat Tiefbau" and body["draft"]["authority"] == "Baureferat Tiefbau"
+    assert research.queries[0].category == "graffiti" and draft.seen[0].category == "graffiti"
+    assert env.status_store.rows[asked["id"]].status == "drafted"
+
+
+def test_the_answer_is_kept_when_the_user_reads_the_report_again():
+    env, _, _ = unsure(confidence=0.3)
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "x", **PLACE}, headers=headers).json()
+        answered = env.client.post(f"/v1/reports/{asked['id']}/answer", json={"category": "tree"}, headers=headers).json()
+        read = env.client.get(f"/v1/reports/{asked['id']}", headers=headers).json()
+    assert read == answered and read["classification"]["category"] == "tree"
+
+
+def test_a_question_can_be_answered_only_once():
+    env, research, _ = unsure(confidence=0.3)
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "x", **PLACE}, headers=headers).json()
+        url = f"/v1/reports/{asked['id']}/answer"
+        first = env.client.post(url, json={"category": "tree"}, headers=headers)
+        second = env.client.post(url, json={"category": "litter"}, headers=headers)
+    assert first.status_code == 200 and second.status_code == 409 and len(research.queries) == 1
+
+
+def test_a_report_without_a_question_cannot_be_answered():
+    with Env(provider=FixedClassification(confidence=0.9)) as env:
+        headers = env.login()
+        done = env.post({"text": "x", **PLACE}, headers=headers).json()
+        response = env.client.post(f"/v1/reports/{done['id']}/answer", json={"category": "tree"}, headers=headers)
+    assert response.status_code == 409
+
+
+def test_an_answer_needs_a_login_and_belongs_to_the_owner_only():
+    env, research, _ = unsure(confidence=0.3)
+    with env:
+        anna = env.login("anna")
+        asked = env.post({"text": "x", **PLACE}, headers=anna).json()
+        url = f"/v1/reports/{asked['id']}/answer"
+        without = env.client.post(url, json={"category": "tree"})
+        foreign = env.client.post(url, json={"category": "tree"}, headers=env.login("ben"))
+        unknown = env.client.post(f"/v1/reports/{'a' * 32}/answer", json={"category": "tree"}, headers=anna)
+    assert (without.status_code, foreign.status_code, unknown.status_code) == (401, 404, 404)
+    assert research.queries == [] and env.status_store.rows[asked["id"]].status == "needs_input"  # the foreign answer changed nothing
+
+
+@pytest.mark.parametrize("body", [{"category": "other"}, {"category": "dog"}, {}, {"category": "tree", "extra": "x"}, {"category": None}])
+def test_only_a_known_category_is_an_answer(body):
+    env, research, _ = unsure(confidence=0.3)
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "x", **PLACE}, headers=headers).json()
+        response = env.client.post(f"/v1/reports/{asked['id']}/answer", json=body, headers=headers)
+    assert response.status_code == 422 and research.queries == []
+    assert env.status_store.rows[asked["id"]].status == "needs_input"
+
+
+def test_the_question_survives_a_new_read_by_the_owner():
+    env, _, _ = unsure(confidence=0.3)
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "x", **PLACE}, headers=headers).json()
+        read = env.client.get(f"/v1/reports/{asked['id']}", headers=headers).json()
+    assert read["clarification"] == asked["clarification"] and read["clarification"]["reason"] == "unclear"

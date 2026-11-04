@@ -22,6 +22,7 @@ private enum StoredContent: Codable {
     case photo(file: String, caption: String?)
     case status(String)
     case question(String, options: [String])
+    case clarification(reportID: String, text: String, options: [String])
     case draft(subject: String, body: String, authority: String, version: Int, recipient: String?, language: String?, summaryDE: String?, photoFile: String?)
     case emergency
     case sanitized(text: String?, photoFile: String?, changes: [String])
@@ -163,6 +164,7 @@ final class TicketStore {
             content = .photo(file: file, caption: caption)
         case .status(let text): content = .status(text)
         case .question(let text, let options): content = .question(text, options: options)
+        case .clarification(let reportID, let text, let options): content = .clarification(reportID: reportID, text: text, options: options)
         case .draft(let draft):
             let photoFile = draft.photo.flatMap { savePhoto($0, named: "\(message.id.uuidString)-draft.jpg", in: folder) }
             content = .draft(
@@ -185,6 +187,7 @@ final class TicketStore {
         case .photo(let file, let caption): content = .photo(loadPhoto(file, in: folder) ?? UIImage(systemName: "photo") ?? UIImage(), caption: caption)
         case .status(let text): content = .status(text)
         case .question(let text, let options): content = .question(text, options: options)
+        case .clarification(let reportID, let text, let options): content = .clarification(reportID: reportID, text: text, options: options)
         case .draft(let subject, let body, let authority, let version, let recipient, let language, let summaryDE, let photoFile):
             content = .draft(ReportDraft(
                 subject: subject, body: body, authority: authority, version: version, recipient: recipient,

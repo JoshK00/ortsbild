@@ -259,3 +259,11 @@ def test_postgres_status_store_saves_the_research_and_moves_the_status():
     log = []
     PostgresReportStatusStore("dsn", fake_connect(log, [])).save_research("a" * 32, {"authority": "a"})
     assert "status = 'researched'" in log[0][0]
+
+
+def test_postgres_start_answer_is_one_statement_that_only_matches_a_waiting_report():
+    """Of two answers at the same moment only one finds the status needs_input, so the research starts once."""
+    log = []
+    assert PostgresReportStatusStore("dsn", fake_connect(log, [[("a" * 32,)]])).start_answer("a" * 32) is True
+    assert "status = 'needs_input'" in log[0][0] and "returning id" in log[0][0] and log[0][1] == ("a" * 32,)
+    assert PostgresReportStatusStore("dsn", fake_connect([], [[]])).start_answer("a" * 32) is False

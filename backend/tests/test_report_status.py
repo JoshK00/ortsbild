@@ -61,3 +61,17 @@ def test_unexpected_crash_is_recorded_as_blocked_and_raised_again():
     with pytest.raises(MemoryError):
         process_report(make_report(), CrashingGraph(), store)
     assert store.rows["7c9e"].block_reason == "graph: MemoryError"
+
+
+def test_start_answer_moves_a_waiting_report_once():
+    store = InMemoryReportStatusStore()
+    store.set_status("r1", "needs_input", "app")
+    assert store.start_answer("r1") is True and store.rows["r1"].status == "classified"
+    assert store.start_answer("r1") is False  # the second answer finds nothing waiting
+
+
+def test_start_answer_ignores_other_statuses_and_unknown_reports():
+    store = InMemoryReportStatusStore()
+    store.set_status("r1", "sanitized", "app")
+    assert store.start_answer("r1") is False and store.start_answer("nobody") is False
+    assert store.rows["r1"].status == "sanitized"

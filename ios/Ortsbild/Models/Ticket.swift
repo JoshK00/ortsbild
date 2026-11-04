@@ -38,6 +38,7 @@ enum TicketText {
             case .text(let text): return shortened(text)
             case .status(let text): return shortened(text)
             case .question(let text, _): return shortened(text)
+            case .clarification(_, let text, _): return shortened(text)
             case .draft(let draft): return shortened(draft.subject)
             case .emergency: return "Notfall: bitte 110 oder 112 anrufen"
             case .sanitized: return "Daten anonymisiert"

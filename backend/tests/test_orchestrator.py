@@ -79,3 +79,30 @@ def test_the_classifier_never_sees_the_raw_report():
     graph.invoke({"report": make_report("Schlagloch, 0151 2345678")})
     assert "0151" not in repr(store.get("7c9e").classification)
     assert store.get("7c9e").sanitized["text"] == "Schlagloch, <PHONE>"
+
+
+# ---------------------------------------------------------------------------
+# The decision after the classification
+# ---------------------------------------------------------------------------
+
+from classification.models import Classification  # noqa: E402, F811
+from orchestrator.graph import needs_clarification  # noqa: E402
+
+
+def classification(**values):
+    return Classification(**{"category": "pothole", "lane": "hazard", "emergency": False, "confidence": 0.9, **values})
+
+
+def test_a_classification_is_unclear_if_it_is_other_or_below_the_threshold():
+    assert needs_clarification(classification(confidence=0.59), 0.6)
+    assert not needs_clarification(classification(confidence=0.6), 0.6)  # exactly the threshold is sure enough
+    assert needs_clarification(classification(category="other", confidence=1.0), 0.6)
+    assert not needs_clarification(classification(), 0.6)
+
+
+def test_the_ask_node_waits_for_the_user_and_the_chain_ends_there():
+    graph, store, order = build()
+    # The stand-in finds no word for a text about a bus: category other, so the user is asked
+    result = graph.invoke({"report": make_report("Wann fährt der nächste Bus?")})
+    assert result["needs_input"] is True and "research" not in result and "draft" not in result
+    assert store.rows["7c9e"].status == "needs_input"
