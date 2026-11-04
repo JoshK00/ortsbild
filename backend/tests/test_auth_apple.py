@@ -9,7 +9,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from auth.apple import APPLE_ISSUER, AppleAuthError, AppleTokenVerifier
+from auth.apple import APPLE_ISSUER, AppleAuthError, AppleTokenVerifier, ThrottledJwks
 
 BUNDLE = "com.Joshua-Kehrer.Ortsbild"
 NONCE = "a-random-nonce-from-the-app"
@@ -150,3 +150,58 @@ def test_the_error_message_never_contains_the_token():
     with pytest.raises(AppleAuthError) as error:
         VERIFIER.verify(value, NONCE)
     assert value not in str(error.value)
+
+
+# ---------------------------------------------------------------------------
+# ThrottledJwks: forged tokens must not make us fetch Apple's keys again and again
+# ---------------------------------------------------------------------------
+
+
+class FakeKeyClient:
+    """Counts how often the key list is fetched. `get_signing_keys(refresh=True)` is a fetch, `False` is the cache."""
+
+    def __init__(self, key_ids):
+        self.key_ids, self.cached, self.fetches = key_ids, list(key_ids), 0
+
+    def get_signing_keys(self, refresh=False):
+        if refresh:
+            self.fetches += 1
+            self.cached = list(self.key_ids)
+        return [type("Key", (), {"key_id": key_id})() for key_id in self.cached]
+
+
+def token_with_kid(kid):
+    return jwt.encode({"sub": "x"}, "x" * 32, algorithm="HS256", headers={"kid": kid})
+
+
+def test_a_known_key_id_never_triggers_a_fetch():
+    client = FakeKeyClient(["abc"])
+    assert ThrottledJwks(client).get_signing_key_from_jwt(token_with_kid("abc")).key_id == "abc"
+    assert client.fetches == 0
+
+
+def test_unknown_key_ids_fetch_only_once_a_minute():
+    client, now = FakeKeyClient(["abc"]), [1000.0]
+    jwks = ThrottledJwks(client, clock=lambda: now[0])
+    for _ in range(50):  # a stranger sends forged tokens
+        with pytest.raises(jwt.PyJWKClientError):
+            jwks.get_signing_key_from_jwt(token_with_kid("forged"))
+    assert client.fetches == 1
+    now[0] += 61
+    with pytest.raises(jwt.PyJWKClientError):
+        jwks.get_signing_key_from_jwt(token_with_kid("forged"))
+    assert client.fetches == 2
+
+
+def test_a_newly_rotated_key_is_found_after_the_refresh():
+    """Apple rotates its keys: the first token with the new key id causes one fetch and then works."""
+    client = FakeKeyClient(["old"])
+    jwks = ThrottledJwks(client)
+    client.key_ids = ["old", "new"]
+    assert jwks.get_signing_key_from_jwt(token_with_kid("new")).key_id == "new"
+    assert client.fetches == 1
+
+
+def test_a_token_without_a_readable_header_is_refused():
+    with pytest.raises(jwt.PyJWTError):
+        ThrottledJwks(FakeKeyClient([])).get_signing_key_from_jwt("garbage")
