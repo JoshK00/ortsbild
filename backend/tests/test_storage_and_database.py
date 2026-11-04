@@ -229,14 +229,14 @@ def test_storage_health_names_the_missing_bucket(s3):
 
 def test_database_health_lists_missing_tables():
     """The check says which tables are missing and what to do."""
-    connect = fake_connect([], [[("pseudonyms",), ("refresh_tokens",)]])
+    connect = fake_connect([], [[("pseudonyms",), ("refresh_tokens",), ("authority_registry",)]])
     [result] = run_checks(database_checks("dsn", connect))
     assert result.detail == "missing table: reports, run the SQL files"
 
 
 def test_database_health_passes_when_all_tables_exist():
     """All tables are there."""
-    connect = fake_connect([], [[("pseudonyms",), ("reports",), ("refresh_tokens",)]])
+    connect = fake_connect([], [[("pseudonyms",), ("reports",), ("refresh_tokens",), ("authority_registry",)]])
     assert all(r.ok for r in run_checks(database_checks("dsn", connect)))
 
 

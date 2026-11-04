@@ -10,7 +10,7 @@ from privacy.image_text import OcrEngine
 
 logger = logging.getLogger("ortsbild.api")
 
-REQUIRED_TABLES = ("pseudonyms", "reports", "refresh_tokens")
+REQUIRED_TABLES = ("pseudonyms", "reports", "refresh_tokens", "authority_registry")
 
 
 class HealthCheckError(Exception):

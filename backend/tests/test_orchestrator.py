@@ -10,6 +10,8 @@ from privacy.graph import build_privacy_graph
 from privacy.photo_store import InMemoryPhotoStore
 from privacy.pseudonyms import InMemoryPseudonymStore
 from privacy.report_status import InMemoryReportStatusStore
+from research.registry import InMemoryRegistryStore
+from research.service import Researcher
 
 
 class Order:
@@ -47,7 +49,7 @@ def make_report(text="Schlagloch auf dem Radweg"):
 def build(detector=None):
     order, store, photos = Order(), InMemoryReportStatusStore(), InMemoryPhotoStore()
     privacy = build_privacy_graph([detector or PatternDetector()], photos, InMemoryPseudonymStore("s"))
-    graph = build_report_graph(privacy, Classifier(RecordingProvider(order), photos), store)
+    graph = build_report_graph(privacy, Classifier(RecordingProvider(order), photos), Researcher(InMemoryRegistryStore(), None), store)
     return graph, store, order
 
 

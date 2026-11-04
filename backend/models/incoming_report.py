@@ -18,12 +18,29 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
 
+class Place(ContractModel):
+    """The address of the position as the phone found it (its geocoder), all parts optional.
+
+    The user can correct it, so it is untrusted input: short texts, only used as search words and shown in the
+    message, never put into an instruction.
+    """
+
+    country_code: str | None = Field(default=None, pattern=r"^[A-Za-z]{2}$")  # ISO 3166 alpha-2, e.g. DE
+    state: str | None = Field(default=None, max_length=120)
+    municipality: str | None = Field(default=None, max_length=120)  # town or municipality
+    district: str | None = Field(default=None, max_length=120)
+    postal_code: str | None = Field(default=None, max_length=20)
+    street: str | None = Field(default=None, max_length=160)
+    house_number: str | None = Field(default=None, max_length=20)
+
+
 class Location(ContractModel):
     """Geographic position of a report as WGS84 coordinates in decimal degrees."""
 
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     accuracy_m: float | None = Field(default=None, ge=0)
+    place: Place | None = None  # the address of the position, from the phone
     # TODO: Decide whether origin is required or can be dropped. The privacy layer no
     #       longer uses it, the location is passed on unchanged.
     origin: Literal["device_gps", "exif", "geocoded_from_text"] | None = None

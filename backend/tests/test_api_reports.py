@@ -14,6 +14,8 @@ from privacy.image_detectors import Box
 from privacy.photo_store import InMemoryPhotoStore
 from privacy.pseudonyms import InMemoryPseudonymStore
 from privacy.report_status import InMemoryReportStatusStore
+from research.registry import InMemoryRegistryStore
+from research.service import Researcher
 from tests.auth_helpers import make_auth_manager, sign_in
 from tests.image_helpers import make_heic, make_jpeg, make_png
 
@@ -40,7 +42,7 @@ class BrokenDetector:
 class Env:
     """The app with in-memory parts, and the parts to look into."""
 
-    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None):
+    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None):
         self.photo_store, self.status_store = InMemoryPhotoStore(), InMemoryReportStatusStore()
         self.pseudonym_store = InMemoryPseudonymStore("s")
         self.auth, self.token_store = make_auth_manager()
@@ -48,7 +50,9 @@ class Env:
             [text_detector or PatternDetector()], self.photo_store, self.pseudonym_store,
             face_detector=face_detector or NoFace(),
         )
-        graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), self.status_store)
+        self.registry = InMemoryRegistryStore()
+        researcher = Researcher(self.registry, research_provider)
+        graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), researcher, self.status_store)
         services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth)
         self.client = TestClient(create_app(checks={}, services=services, api_key="k", configure_logging=False, reports_per_hour=reports_per_hour))
 
@@ -444,3 +448,105 @@ def test_a_retry_returns_the_classification_of_the_first_answer():
         first = env.post({"text": "Schlagloch"}, headers=headers).json()
         second = env.post({"text": "Schlagloch"}, headers=headers).json()
     assert second == first and len(provider.seen) == 1  # the model is not called twice
+
+
+# ---------------------------------------------------------------------------
+# Research in the chain
+# ---------------------------------------------------------------------------
+
+from research.models import Channel, ResearchResult  # noqa: E402
+from research.provider import ScriptedResearchProvider  # noqa: E402
+
+PLACE = {"country_code": "DE", "municipality": "München", "district": "Altstadt", "street": "Hauptstraße", "house_number": "12"}
+FOUND = ResearchResult(
+    authority="Baureferat Tiefbau", channel=Channel(type="email", target="tiefbau@muenchen.de"), language="de",
+    sources=["https://www.muenchen.de/kontakt"], confidence=0.7,
+)
+
+
+def test_the_authority_comes_back_with_the_report():
+    provider = ScriptedResearchProvider(FOUND)
+    with Env(research_provider=provider) as env:
+        body = env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE}).json()
+    assert body["research"]["authority"] == "Baureferat Tiefbau" and body["research"]["channel"]["target"] == "tiefbau@muenchen.de"
+    assert body["research"]["sources"] == ["https://www.muenchen.de/kontakt"]
+    assert env.status_store.rows[body["id"]].status == "researched"
+
+
+def test_the_place_is_stored_with_the_location_and_returned():
+    with Env(research_provider=ScriptedResearchProvider(FOUND)) as env:
+        body = env.post({"text": "Schlagloch", **PLACE}).json()
+    place = body["report"]["location"]["place"]
+    assert {name: value for name, value in place.items() if value} == PLACE
+
+
+def test_the_research_gets_only_the_place_and_the_category():
+    provider = ScriptedResearchProvider(FOUND)
+    with Env(research_provider=provider) as env:
+        env.post({"text": "Schlagloch, ruf mich an unter 0151 2345678", "lat": "48.13", "lon": "11.57", **PLACE}, user="anna")
+    [query] = provider.queries
+    assert query.model_dump() == {"category": "pothole", "country_code": "DE", "municipality": "München", "district": "Altstadt", "exclude": []}
+
+
+def test_the_second_report_from_the_same_place_needs_no_new_research():
+    provider = ScriptedResearchProvider(FOUND)
+    with Env(research_provider=provider) as env:
+        env.post({"text": "Schlagloch", **PLACE}, user="anna")
+        second = env.post({"text": "Schlagloch", "client_report_id": "report-0002", **PLACE}, user="ben").json()
+    assert len(provider.queries) == 1 and second["research"]["origin"] == "registry"
+
+
+def test_without_a_provider_or_a_place_the_research_is_null_and_the_report_still_works():
+    with Env() as env:  # no research provider
+        without_provider = env.post({"text": "Schlagloch", **PLACE}).json()
+    with Env(research_provider=ScriptedResearchProvider(FOUND)) as env:
+        without_place = env.post({"text": "Schlagloch"}).json()
+    for body in (without_provider, without_place):
+        assert body["status"] == "sanitized" and body["classification"] and body["research"] is None
+
+
+def test_an_emergency_is_not_researched():
+    provider = ScriptedResearchProvider(FOUND)
+    with Env(research_provider=provider) as env:
+        body = env.post({"text": "Auto brennt vor dem Haus", **PLACE}).json()
+    assert body["classification"]["emergency"] is True and body["research"] is None and provider.queries == []
+
+
+def test_a_failing_research_does_not_break_the_report():
+    class Broken:
+        def research(self, query):
+            raise RuntimeError("search down: secret")
+
+    with Env(research_provider=Broken()) as env:
+        response = env.post({"text": "Schlagloch", **PLACE})
+    assert response.status_code == 200 and response.json()["research"] is None and "secret" not in response.text
+
+
+def test_the_owner_reads_the_authority_again_and_a_foreign_user_does_not():
+    with Env(research_provider=ScriptedResearchProvider(FOUND)) as env:
+        anna = env.login("anna")
+        created = env.post({"text": "Schlagloch", **PLACE}, headers=anna).json()
+        again = env.client.get(f"/v1/reports/{created['id']}", headers=anna).json()
+        foreign = env.client.get(f"/v1/reports/{created['id']}", headers=env.login("ben"))
+    assert again["research"] == created["research"] and foreign.status_code == 404
+
+
+def test_an_invalid_place_is_rejected():
+    with Env() as env:
+        assert env.post({"text": "x", "country_code": "Deutschland"}).status_code == 422
+        assert env.post({"text": "x", "municipality": "x" * 121}).status_code == 422
+
+
+def test_empty_parts_of_the_place_are_dropped():
+    with Env() as env:
+        body = env.post({"text": "Schlagloch", "municipality": "  ", "street": "Hauptstraße"}).json()
+    assert body["report"]["location"]["place"] == {"street": "Hauptstraße", "country_code": None, "state": None, "municipality": None, "district": None, "postal_code": None, "house_number": None}
+
+
+def test_deleting_the_account_removes_the_research_of_the_user_but_keeps_the_registry():
+    """The registry holds no report and no user, only a place and a public authority."""
+    with Env(research_provider=ScriptedResearchProvider(FOUND)) as env:
+        headers = env.login()
+        env.post({"text": "Schlagloch", **PLACE}, headers=headers)
+        env.client.delete("/v1/account", headers=headers)
+    assert env.status_store.research == {} and len(env.registry.entries) == 1

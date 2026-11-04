@@ -13,6 +13,8 @@ from privacy.photo_sanitize import ImageOptions
 from privacy.photo_store import InMemoryPhotoStore
 from privacy.pseudonyms import InMemoryPseudonymStore
 from privacy.report_status import InMemoryReportStatusStore
+from research.registry import InMemoryRegistryStore
+from research.service import Researcher
 from privacy.service import process_report
 from tests.image_helpers import make_jpeg
 from tests.test_privacy_pseudonyms_assemble import make_report
@@ -82,7 +84,7 @@ def test_api_answers_rejected_with_a_reason_code_only():
         [PatternDetector()], photo_store, InMemoryPseudonymStore("s"),
         face_detector=Faces(12), image_options=ImageOptions(max_faces=10),
     )
-    graph = build_report_graph(privacy_graph, Classifier(RuleBasedProvider(), photo_store), status_store)
+    graph = build_report_graph(privacy_graph, Classifier(RuleBasedProvider(), photo_store), Researcher(InMemoryRegistryStore(), None), status_store)
     app = create_app(checks={}, services=Services(graph, photo_store, status_store, InMemoryPseudonymStore("s"), make_auth_manager()[0]), configure_logging=False)
     with TestClient(app) as client:
         response = client.post("/v1/reports", data=FORM, files={"photo": ("p.jpg", make_jpeg(size=(80, 20)), "image/jpeg")}, headers=sign_in(client))

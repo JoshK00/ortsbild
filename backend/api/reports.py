@@ -78,13 +78,13 @@ def report_payload(record: ReportRecord) -> dict:
     if it does not exist (yet). A blocked report gets no reason (it is in the log and the status table).
     A rejected one gets a short code.
     """
-    empty = {"id": record.report_id, "report": None, "photo_urls": [], "classification": None}
-    if record.status in ("sanitized", "classified") and record.sanitized is not None:
+    empty = {"id": record.report_id, "report": None, "photo_urls": [], "classification": None, "research": None}
+    if record.status in ("sanitized", "classified", "researched") and record.sanitized is not None:
         photos = record.sanitized.get("photos", [])
         urls = [f"/v1/reports/{record.report_id}/photos/{photo['id']}" for photo in photos]
         return {
             "id": record.report_id, "status": "sanitized", "report": record.sanitized,
-            "photo_urls": urls, "classification": record.classification,
+            "photo_urls": urls, "classification": record.classification, "research": record.research,
         }
     if record.status == "blocked_privacy":
         return {**empty, "status": "blocked"}
@@ -118,6 +118,13 @@ def create_reports_router(
         lon: float = Form(..., ge=-180, le=180),
         text: str | None = Form(None, max_length=MAX_TEXT_CHARS),
         accuracy_m: float | None = Form(None, ge=0),
+        country_code: str | None = Form(None, pattern=r"^[A-Za-z]{2}$"),
+        state: str | None = Form(None, max_length=120),
+        municipality: str | None = Form(None, max_length=120),
+        district: str | None = Form(None, max_length=120),
+        postal_code: str | None = Form(None, max_length=20),
+        street: str | None = Form(None, max_length=160),
+        house_number: str | None = Form(None, max_length=20),
         photo: UploadFile | None = File(None),
         user: AccessClaims = Depends(current_user),
     ) -> JSONResponse:
@@ -150,12 +157,18 @@ def create_reports_router(
             services.photo_store.save(raw_ref, data, mime_type)
             photos.append({"id": "p1", "mime_type": mime_type, "ref": raw_ref})
 
+        # The address as the phone found it, the user may have corrected it. Empty parts are dropped.
+        parts = {
+            "country_code": country_code, "state": state, "municipality": municipality, "district": district,
+            "postal_code": postal_code, "street": street, "house_number": house_number,
+        }
+        parts = {name: value.strip() for name, value in parts.items() if value and value.strip()}
         try:
             report = IncomingReport(
                 id=report_id,
                 received_at=datetime.now(timezone.utc),
                 source={"type": "app", "connector": "app-api", "raw_ref": f"raw/{report_id}/"},
-                location={"lat": lat, "lon": lon, "accuracy_m": accuracy_m, "origin": "device_gps"},
+                location={"lat": lat, "lon": lon, "accuracy_m": accuracy_m, "origin": "device_gps", "place": parts or None},
                 text=text,
                 photos=photos,
                 user={"identifier": user.user_key, "identifier_type": "user_key"},

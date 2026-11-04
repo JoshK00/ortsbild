@@ -121,11 +121,21 @@ class PostgresReportStatusStore:
 
         retry(run, "classification save")
 
+    def save_research(self, report_id: str, research: dict) -> None:
+        def run() -> None:
+            with self.connect(self.dsn) as connection:
+                connection.execute(
+                    "update reports set research = %s, status = 'researched', updated_at = now() where id = %s",
+                    (Jsonb(research), report_id),
+                )
+
+        retry(run, "research save")
+
     def get(self, report_id: str) -> ReportRecord | None:
         def run():
             with self.connect(self.dsn) as connection:
                 return connection.execute(
-                    "select id, user_key, status, block_reason, sanitized_report, classification from reports where id = %s",
+                    "select id, user_key, status, block_reason, sanitized_report, classification, research from reports where id = %s",
                     (report_id,),
                 ).fetchone()
 
@@ -148,7 +158,7 @@ class PostgresReportStatusStore:
             with self.connect(self.dsn) as connection:
                 return connection.execute(
                     "delete from reports where user_key = %s "
-                    "returning id, user_key, status, block_reason, sanitized_report, classification",
+                    "returning id, user_key, status, block_reason, sanitized_report, classification, research",
                     (user_key,),
                 ).fetchall()
 

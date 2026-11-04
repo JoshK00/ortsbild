@@ -28,6 +28,9 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     from classification.provider import provider_from_env
     from classification.service import Classifier
     from orchestrator.graph import build_report_graph
+    from research.postgres_registry import PostgresRegistryStore
+    from research.provider import provider_from_env as research_provider_from_env
+    from research.service import Researcher
     from privacy.graph import build_privacy_graph, default_detectors
     from privacy.image_detectors import YuNetFaceDetector
     from privacy.image_text import RapidOcrEngine
@@ -53,7 +56,8 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
         ocr_engine=ocr_engine,
     )
     status_store = postgres_status_store_from_env()
-    graph = build_report_graph(privacy_graph, Classifier(provider_from_env(), photo_store), status_store)
+    researcher = Researcher(PostgresRegistryStore(os.environ["DATABASE_URL"]), research_provider_from_env())
+    graph = build_report_graph(privacy_graph, Classifier(provider_from_env(), photo_store), researcher, status_store)
 
     # Without AUTH_SECRET the app does not start: nobody can sign in, and there is no open fallback
     auth = AuthManager(
