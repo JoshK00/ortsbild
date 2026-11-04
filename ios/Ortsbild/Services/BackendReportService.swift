@@ -115,7 +115,19 @@ struct BackendReportService: ReportService {
                 image = UIImage(data: data)
             }
             emit(.sanitized(SanitizedResult(text: report.text, photo: image, entries: report.redactionLog.entries)))
-            emit(.text("So sieht deine Meldung aus, nachdem alles Persönliche entfernt wurde. Kategorie und Entwurf an die Behörde folgen in einer späteren Version."))
+            guard let classification = response.classification else {
+                emit(.status("Die Kategorie konnte noch nicht bestimmt werden"))
+                emit(.text("So sieht deine Meldung aus, nachdem alles Persönliche entfernt wurde. Der Entwurf an die Behörde folgt in einer späteren Version."))
+                return
+            }
+            if classification.emergency {
+                // Only the hint, no ticket: in an emergency the police or the fire service must be called, not the city
+                emit(.emergency)
+                return
+            }
+            let sure = classification.isUnsure ? ", unsicher" : ""
+            emit(.status("Kategorie: \(classification.categoryName) (\(Int((classification.confidence * 100).rounded())) %\(sure)), \(classification.laneName)"))
+            emit(.text("So sieht deine Meldung aus, nachdem alles Persönliche entfernt wurde. Der Entwurf an die Behörde folgt in einer späteren Version."))
         case "rejected":
             if response.reason == "too_many_faces" {
                 emit(.text("Auf dem Foto sind zu viele Personen zu sehen. Ich habe es nicht gespeichert. Bitte mach ein neues Foto von nahem, ohne Personen im Bild."))

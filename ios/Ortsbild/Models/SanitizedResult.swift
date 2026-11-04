@@ -14,11 +14,41 @@ nonisolated struct ReportResponse: Decodable, Sendable {
     let reason: String?
     let report: SanitizedReportDTO?
     let photoUrls: [String]
+    /// `nil` if the classification failed, the report is classified later.
+    let classification: ClassificationDTO?
 
     enum CodingKeys: String, CodingKey {
-        case id, status, reason, report
+        case id, status, reason, report, classification
         case photoUrls = "photo_urls"
     }
+}
+
+/// The classification of a report as the backend sends it.
+nonisolated struct ClassificationDTO: Decodable, Sendable {
+    let category: String
+    let lane: String
+    let emergency: Bool
+    /// 0 to 1, how sure the classification is about the category.
+    let confidence: Double
+
+    /// German name of the category for the chat.
+    var categoryName: String {
+        switch category {
+        case "litter": "Müll"
+        case "graffiti": "Graffiti"
+        case "street_light": "Straßenbeleuchtung"
+        case "playground_equipment": "Spielgerät"
+        case "pothole": "Schlagloch"
+        case "tree": "Baum"
+        default: "Sonstiges"
+        }
+    }
+
+    var laneName: String {
+        lane == "hazard" ? "Gefahrenstelle" : "Beeinträchtigung"
+    }
+
+    var isUnsure: Bool { confidence < 0.5 }
 }
 
 nonisolated struct SanitizedReportDTO: Decodable, Sendable {
