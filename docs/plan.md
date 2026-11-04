@@ -93,7 +93,7 @@ Waits for the architecture overview of the team.
 | 5.1 | Architecture overview of the team replaces section 3 of the documentation, order and scope of agents 3 to 7 | Team | M |
 | 5.2 | **In progress** (C0 to C5 built with a stand-in provider, model choice open). Agent 1: classification of the sanitized report (category, lane, emergency) with the model provider chosen for it. Detail plan: [classification-plan.md](classification-plan.md) | Claude, Team | L |
 | 5.3 | Choose the model provider for the agents after the privacy layer (EU API, DPA, endpoint hard-wired) | Team | M |
-| 5.4 | Research agent (responsible authority and channel, detail plan: [research-plan.md](research-plan.md)), drafting agent, policy code with levels | Claude, Team | L |
+| 5.4 | **In progress**: the research is built (memory, web research with Mistral, check of every answer, app display), still open: confirmation actions, evaluation set, the drafting agent. Research agent (responsible authority and channel, detail plan: [research-plan.md](research-plan.md)), drafting agent, policy code with levels | Claude, Team | L |
 | 5.5 | Duplicate check by location (PostGIS image instead of the plain Postgres) | Claude | M |
 | 5.6 | Approval pause (interrupt) and the actions approve, revise, wrong authority, close | Claude | L |
 | 5.7 | Outbound connectors (Open311, email, web form), simulated sending first | Claude | L |

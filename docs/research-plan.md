@@ -1,6 +1,6 @@
 # Plan: research of the responsible authority (agent 2)
 
-Status: 2026-11-04, revised the same day. Detail plan for the research part of item 5.4 of [plan.md](plan.md). Effort: S = under an hour, M = a few hours, L = a day or more.
+Status: 2026-11-04, revised the same day. **Built: R1 to R6 and the display part of R7 (see the steps). Open: the actions in the app (confirm, wrong authority, enter by hand), the editable address line, the evaluation set (R8) and the choice of the real provider (R9).** Detail plan for the research part of item 5.4 of [plan.md](plan.md). Effort: S = under an hour, M = a few hours, L = a day or more.
 Owner: **You** = needs your decision or your accounts, **Claude** = can be built here, **Team** = needs the team or an expert.
 
 ## What changed
@@ -113,13 +113,13 @@ A node `research` behind `classify` in `orchestrator/graph.py`. Emergencies and 
 | # | What | Owner | Effort | Done when |
 |---|---|---|---|---|
 | R0 | Decide P1 to P6 | You, Team | S | written into the decision log |
-| R1 | Contract: `Place`, `Channel`, `ResearchResult`, strict models with tests | Claude | S | tests green |
-| R2 | App: turn the position into a `Place` with the phone's geocoder, show one editable line, send the fields. Backend: take them in, validate, store | Claude | M | the place arrives and is stored |
-| R3 | The safe page fetcher with its limits and tests (private addresses, redirects, size, time) | Claude | M | the attacks of the tests are refused |
-| R4 | Search provider interface and a scripted stand-in, the agent graph with source check | Claude | L | a scripted run gives a result with sources, an answer without a source is dropped |
-| R5 | Registry as a memory: table (migration `006`), lookup first, write on confirmation, expiry | Claude | M | the second report of a place needs no model |
-| R6 | Put it into the chain: node `research`, status `researched`, the answer in the endpoint and `GET /v1/reports/{id}` | Claude | M | the result comes back with the report |
-| R7 | App: show authority, contact and the source links, the actions confirm, wrong authority, enter by hand | Claude | M | the mock lines are gone |
+| R1 | ~~Contract: `Place`, `Channel`, `ResearchResult`, strict models with tests~~ **Done** (`research/models.py`, `Place` in `models/incoming_report.py`) | Claude | S | tests green |
+| R2 | ~~App: turn the position into a `Place` with the phone's geocoder, show one editable line, send the fields. Backend: take them in, validate, store~~ **Mostly done**: the app turns the position into a `Place` with MapKit and sends it, the backend validates, stores and returns it. Still open: the editable line for the user | Claude | M | the place arrives and is stored |
+| R3 | ~~The safe page fetcher with its limits and tests (private addresses, redirects, size, time)~~ **Done**: `research/fetcher.py` with tests for the attacks. It is used to *check* answers (`research/verify.py`), not as a tool of an agent | Claude | M | the attacks of the tests are refused |
+| R4 | ~~Search provider interface and a scripted stand-in, the agent graph with source check~~ **Changed and done**: no own agent loop. One call to Mistral with its built-in web search finds the answer (`research/mistral.py`), then our code checks every answer against the pages it names. A scripted stand-in exists for tests | Claude | L | a scripted run gives a result with sources, an answer without a source is dropped |
+| R5 | ~~Registry as a memory: table (migration `006`), lookup first, write on confirmation, expiry~~ **Done**: `authority_registry` (migration `006`), lookup first, an entry found by the agent expires after 30 days. Still open: writing the confirmations from the app | Claude | M | the second report of a place needs no model |
+| R6 | ~~Put it into the chain: node `research`, status `researched`, the answer in the endpoint and `GET /v1/reports/{id}`~~ **Done**: node `research` in the orchestrator, status `researched`, the answer in the endpoints | Claude | M | the result comes back with the report |
+| R7 | ~~App: show authority, contact and the source links, the actions confirm, wrong authority, enter by hand~~ **Partly done**: the chat shows authority, contact and sources. Still open: confirm, wrong authority and enter by hand | Claude | M | the mock lines are gone |
 | R8 | Evaluation set: 15 to 20 real places (the home towns of the team) with the authority a person checked, and a script for the hit rate, answers without a source and time | Team, Claude | M | table with numbers |
 | R9 | Real search provider and real model, chosen with the classification decision | You, Team, Claude | M | decision with numbers |
 
