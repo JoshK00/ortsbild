@@ -1,6 +1,6 @@
 # Plan: classification (agent 1)
 
-Status: 2026-11-04. Detail plan for item 5.2 of [plan.md](plan.md). Effort: S = under an hour, M = a few hours, L = a day or more.
+Status: 2026-11-04. Detail plan for item 5.2 of [plan.md](plan.md). **Built so far: C0 to C5 (with the stand-in provider and text cases only), still open: C6 (model choice), C7, C8, and the photo cases of C5.** Effort: S = under an hour, M = a few hours, L = a day or more.
 Owner: **You** = needs your decision or your accounts, **Claude** = can be built here, **Team** = needs the team or an expert.
 
 ## Goal
@@ -46,12 +46,12 @@ No free-text "reason" field: it would be one more place where personal data coul
 
 | # | What | Owner | Effort | Done when |
 |---|---|---|---|---|
-| C0 | Decide D2 to D5 (D1 comes after C6) | You, Team | S | written into the decision log |
-| C1 | Contract: `Classification` and `ClassificationInput` (what leaves the server: text and photo bytes, nothing else), strict models with tests | Claude, You | S | tests green, `extra` fields and wrong values are rejected |
-| C2 | Provider interface, a **fake provider** (rules on keywords, for tests and development), the prompt, parsing and validation of the answer, retry for transient errors only, timeout, one retry on an invalid answer | Claude | M | the whole path runs without a real model, the failure cases are tested |
-| C3 | Put it into the flow: step after the privacy layer, migration `005` (`classification`, status `classified`), the endpoint answer and `GET /v1/reports/{id}` carry it, the failure path leaves the report `sanitized` | Claude | M | a report comes back with a classification, a broken provider does not break the report |
-| C4 | App: show the real category and the emergency banner, handle "not classified yet" | Claude | S | the mock lines for the category are gone |
-| C5 | Evaluation set: 40 to 60 German cases, 5 to 8 per category, plus the hard ones (emergencies, a selfie, an empty text, a text that tries to give the model orders, unclear photos), and a script that prints accuracy, a confusion table, **emergency recall**, time and cost per report | Claude, You, Team | M | the script runs against the fake provider and reports numbers |
+| C0 | ~~Decide D2 to D5 (D1 comes after C6)~~ **Done**: all recommendations accepted for the MVP, in the decision log | You, Team | S | written into the decision log |
+| C1 | ~~Contract: `Classification` and `ClassificationInput` (what leaves the server: text and photo bytes, nothing else), strict models with tests~~ **Done** (`classification/models.py`) | Claude, You | S | tests green, `extra` fields and wrong values are rejected |
+| C2 | ~~Provider interface, a **fake provider** (rules on keywords, for tests and development), the prompt, parsing and validation of the answer, retry for transient errors only, timeout, one retry on an invalid answer~~ **Done** (`classification/`: provider interface, `RuleBasedProvider`, prompt, `Classifier` with retry and the emergency fallback) | Claude | M | the whole path runs without a real model, the failure cases are tested |
+| C3 | ~~Put it into the flow: step after the privacy layer, migration `005` (`classification`, status `classified`), the endpoint answer and `GET /v1/reports/{id}` carry it, the failure path leaves the report `sanitized`~~ **Done** (`orchestrator/graph.py`, migration `005`, to be applied on the server) | Claude | M | a report comes back with a classification, a broken provider does not break the report |
+| C4 | ~~App: show the real category and the emergency banner, handle "not classified yet"~~ **Done** (category, lane and the emergency banner in the chat) | Claude | S | the mock lines for the category are gone |
+| C5 | ~~Evaluation set: 40 to 60 German cases, 5 to 8 per category, plus the hard ones (emergencies, a selfie, an empty text, a text that tries to give the model orders, unclear photos), and a script that prints accuracy, a confusion table, **emergency recall**, time and cost per report~~ **Partly done**: 50 text cases, the harness and `make eval-classification` exist, the photo cases are still missing (`backend/eval/README.md`) | Claude, You, Team | M | the script runs against the fake provider and reports numbers |
 | C6 | Provider spike: run the set against two or three candidates, compare, check the DPA path, decide D1 | You, Team, Claude | M | decision with a table in the decision log |
 | C7 | Low confidence: below a configurable threshold the app asks one follow-up question (the escalation level 2 of the concept) instead of guessing | Claude | M | the question comes from the backend, not from the mock |
 | C8 | Hardening before the second slow step arrives: a cap on parallel reports (the Cube is small), answer by polling instead of one long request, a job that closes reports stuck in `processing`, a cost alert at the provider | Claude | M | a flood of photos gets 503 instead of an out-of-memory crash |

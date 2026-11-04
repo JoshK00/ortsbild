@@ -51,7 +51,7 @@ iOS refuses plain HTTP, and until then photos and the API key travel unencrypted
 | 2.4 | ~~Sign in with Apple in the app (button with nonce), the tokens in the Keychain, refresh on 401, restore the session at launch~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | M | same session after a restart |
 | 2.5 | ~~Base URL as a setting (no key in the app any more, nothing secret ships with it)~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | S | no secret in the repository or the app |
 | 2.6 | ~~Show the answer in the chat: sanitized text, the cleaned photo, the line "Daten anonymisiert"; handle `blocked` and `rejected` with a clear German message~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | M | the three outcomes look right |
-| 2.7 | Install on your iPhone (Xcode, signing with your Apple ID) and test with a photo and a text | You | M | you see the sanitized result in the chat |
+| 2.7 | ~~Install on your iPhone (Xcode, signing with your Apple ID) and test with a photo and a text~~ **Done** (2026-11-04: login, upload, anonymization and the confirmation work, one face false positive on a wall, see 3.3a) | You | M | you see the sanitized result in the chat |
 
 ## Phase 3: Safety net for faces and text in photos (parallel to phase 2)
 
@@ -62,6 +62,7 @@ The face detector misses faces that are cut off, turned away or tiny (seen on th
 | 3.1 | Apple Vision on the device: warn before the upload if faces are visible, ask for a new photo | Claude | M | warning appears |
 | 3.2 | Photo tips as an overlay in the camera view, hint after a rejected photo | Claude | S | overlay visible |
 | 3.3 | Evaluation set: 20 to 30 realistic German cases (text with names, addresses, plates, photos with and without people) and a script that measures the hit rate | Claude, You | M | table with numbers in the documentation |
+| 3.3a | The face detector marked a face on a concrete wall (first iPhone test, 2026-11-04): add such "no face" photos (walls, bark, patterns) to the evaluation set and tune `FACE_SCORE_THRESHOLD` against them | Claude, You | S | table with false positives |
 | 3.4 | Spike with a stronger server model (EgoBlur: fill the license form, measure time and hit rate on the evaluation set) | You, Claude | M | decision: keep YuNet only, or add a second detector |
 | 3.5 | License plates in photos: decide between OCR only and a dedicated detector, based on 3.3 | Claude, Team | M | decision in the decision log |
 | 3.6 | Cover only the personal word in photo text (word boxes instead of line boxes) | Claude | M | only the word is black |
@@ -90,7 +91,7 @@ Waits for the architecture overview of the team.
 | # | What | Owner | Effort |
 |---|---|---|---|
 | 5.1 | Architecture overview of the team replaces section 3 of the documentation, order and scope of agents 3 to 7 | Team | M |
-| 5.2 | Agent 1: classification of the sanitized report (category, lane, emergency) with the model provider chosen for it. Detail plan: [classification-plan.md](classification-plan.md) | Claude, Team | L |
+| 5.2 | **In progress** (C0 to C5 built with a stand-in provider, model choice open). Agent 1: classification of the sanitized report (category, lane, emergency) with the model provider chosen for it. Detail plan: [classification-plan.md](classification-plan.md) | Claude, Team | L |
 | 5.3 | Choose the model provider for the agents after the privacy layer (EU API, DPA, endpoint hard-wired) | Team | M |
 | 5.4 | Research agent (responsible authority and channel), drafting agent, policy code with levels | Claude, Team | L |
 | 5.5 | Duplicate check by location (PostGIS image instead of the plain Postgres) | Claude | M |
@@ -108,6 +109,6 @@ See [model-license.md](model-license.md): `make notices`, license texts, remove 
 
 ## The next three actions
 
-1. **You:** 2.7, the test on the iPhone with real photos (text with a phone number, a photo without people, a photo with one face), and tell what you see. Also 0.2, the cost alert at IONOS.
-2. **You, Team:** decisions D2 to D5 of [classification-plan.md](classification-plan.md) (categories, lane, emergency, name).
-3. **Claude:** C1 and C2 of the classification plan (contract, provider interface with a fake provider), then the evaluation set.
+1. **You:** apply migration `005` and deploy (see the decision log), then test the category in the app. Also 0.2, the cost alert at IONOS. 2.7 is done: the first iPhone test passed.
+2. **Team:** take the photos for the evaluation set (`backend/eval/README.md`) and shortlist two or three model providers (step C6).
+3. **Claude:** the provider spike (C6) once photos and the DPA path exist, then C7 and C8.
