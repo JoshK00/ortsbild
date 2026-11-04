@@ -41,6 +41,8 @@ enum ChatContent {
     case emergency
     /// The report after the privacy layer: cleaned photo and text, and what was removed.
     case sanitized(SanitizedResult)
+    /// What the app is doing right now, for the activity bar. It is not a chat message and is never added to the chat.
+    case activity(String)
 }
 
 struct ChatMessage: Identifiable {

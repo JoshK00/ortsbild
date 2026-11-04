@@ -48,7 +48,7 @@ struct BackendReportService: ReportService {
             return
         }
 
-        emit(.status("Standort wird bestimmt"))
+        emit(.activity("Standort wird bestimmt"))
         let position: CLLocation
         do {
             position = try await location.currentLocation()
@@ -61,6 +61,7 @@ struct BackendReportService: ReportService {
         }
 
         // The address of the position, from the phone. Without it the report still works, only no authority is researched.
+        emit(.activity("Adresse wird ermittelt"))
         let place = await places.place(for: position)
         if let place { emit(.status("Ort erkannt: \(place.line)")) }
 
@@ -73,7 +74,9 @@ struct BackendReportService: ReportService {
             jpeg = data
         }
 
-        emit(.status("Daten werden anonymisiert"))
+        // One request: the server anonymizes, classifies and searches the authority. The app cannot see the single steps.
+        // TODO: Show the single steps once the answer comes by polling (docs/classification-plan.md, C8)
+        emit(.activity("Daten werden anonymisiert, eingeordnet und die zuständige Stelle wird gesucht"))
         // One id per report: if the answer gets lost and we send again, the server does not create a second report
         let clientReportID = UUID().uuidString
         do {

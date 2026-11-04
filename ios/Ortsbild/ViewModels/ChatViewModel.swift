@@ -12,6 +12,10 @@ final class ChatViewModel {
     var inputText = ""
     var attachedPhoto: UIImage?
     private(set) var isProcessing = false
+    /// What is going on right now, shown in the activity bar. Only set while `isProcessing`.
+    private(set) var activity = "Ich arbeite daran"
+    /// When the current work started.
+    private(set) var processingSince = Date()
 
     private let service: ReportService
 
@@ -63,10 +67,17 @@ final class ChatViewModel {
     }
 
     private func run(_ stream: AsyncStream<ChatContent>) {
+        // The bar is there at once, before the first step is known, so there is no silent moment
+        activity = "Ich arbeite daran"
+        processingSince = Date()
         isProcessing = true
         Task {
             for await content in stream {
-                append(.agent, content)
+                if case .activity(let text) = content {
+                    activity = text  // only for the bar, not a chat message
+                } else {
+                    append(.agent, content)
+                }
             }
             isProcessing = false
         }

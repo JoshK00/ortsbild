@@ -41,12 +41,19 @@ struct ChatView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                ComposerBar(
-                    text: $viewModel.inputText,
-                    photo: $viewModel.attachedPhoto,
-                    canSend: viewModel.canSend,
-                    onSend: handleSend
-                )
+                VStack(spacing: 8) {
+                    if viewModel.isProcessing {
+                        ActivityBar(text: viewModel.activity, since: viewModel.processingSince)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    ComposerBar(
+                        text: $viewModel.inputText,
+                        photo: $viewModel.attachedPhoto,
+                        canSend: viewModel.canSend,
+                        onSend: handleSend
+                    )
+                }
+                .animation(.easeInOut(duration: 0.2), value: viewModel.isProcessing)
             }
             .navigationTitle("Ortsbild")
             .navigationBarTitleDisplayMode(.inline)
@@ -131,6 +138,8 @@ private struct MessageRow: View {
             EmergencyBanner()
         case .sanitized(let result):
             SanitizedCard(result: result)
+        case .activity:
+            EmptyView()  // never added to the chat, the view model keeps it for the activity bar
         }
     }
 }
