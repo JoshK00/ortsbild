@@ -115,8 +115,8 @@ def test_unknown_source_type_is_rejected():
 
 def test_valid_user_is_accepted():
     """Normal case: identifier with a known identifier type."""
-    user = User(identifier="device-8f14e45f", identifier_type="device_id")
-    assert user.identifier_type == "device_id"
+    user = User(identifier="key-8f14e45f", identifier_type="user_key")
+    assert user.identifier_type == "user_key"
 
 
 def test_empty_user_identifier_is_rejected():
@@ -139,7 +139,7 @@ def make_report_data(**overrides):
         "location": {"lat": 48.1371, "lon": 11.5754, "accuracy_m": 12, "origin": "device_gps"},
         "text": "The bin at the bus stop is overflowing.",
         "photos": [{"id": "p1", "mime_type": "image/jpeg", "ref": "raw/7c9e/p1.jpg"}],
-        "user": {"identifier": "device-8f14e45f", "identifier_type": "device_id"},
+        "user": {"identifier": "key-8f14e45f", "identifier_type": "user_key"},
     }
     data.update(overrides)
     return data

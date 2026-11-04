@@ -122,7 +122,7 @@ def make_report(photos, text="Pothole near the school"):
         location={"lat": 48.1371, "lon": 11.5754},
         text=text,
         photos=photos,
-        user={"identifier": "device-1", "identifier_type": "device_id"},
+        user={"identifier": "key-1", "identifier_type": "user_key"},
     )
 
 

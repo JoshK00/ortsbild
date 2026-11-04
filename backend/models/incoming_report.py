@@ -57,7 +57,7 @@ class User(ContractModel):
     """
 
     identifier: str = Field(min_length=1)
-    identifier_type: Literal["email", "device_id"]
+    identifier_type: Literal["email", "user_key"]
 
 
 class IncomingReport(ContractModel):

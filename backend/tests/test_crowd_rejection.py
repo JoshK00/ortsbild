@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from api.main import create_app
 from api.reports import Services
+from tests.auth_helpers import make_auth_manager, sign_in
 from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
 from privacy.image_detectors import Box
@@ -13,8 +14,7 @@ from privacy.service import process_report
 from tests.image_helpers import make_jpeg
 from tests.test_privacy_pseudonyms_assemble import make_report
 
-KEY = {"X-API-Key": "k"}
-FORM = {"lat": "48.1", "lon": "11.5", "device_id": "dev-1"}
+FORM = {"client_report_id": "crowd-report-0001", "lat": "48.1", "lon": "11.5"}
 
 
 class Faces:
@@ -79,9 +79,9 @@ def test_api_answers_rejected_with_a_reason_code_only():
         [PatternDetector()], photo_store, InMemoryPseudonymStore("s"),
         face_detector=Faces(12), image_options=ImageOptions(max_faces=10),
     )
-    app = create_app(checks={}, services=Services(graph, photo_store, status_store), api_key="k", configure_logging=False)
+    app = create_app(checks={}, services=Services(graph, photo_store, status_store, InMemoryPseudonymStore("s"), make_auth_manager()[0]), configure_logging=False)
     with TestClient(app) as client:
-        response = client.post("/reports", data=FORM, files={"photo": ("p.jpg", make_jpeg(size=(80, 20)), "image/jpeg")}, headers=KEY)
+        response = client.post("/v1/reports", data=FORM, files={"photo": ("p.jpg", make_jpeg(size=(80, 20)), "image/jpeg")}, headers=sign_in(client))
     body = response.json()
     assert response.status_code == 200
     assert (body["status"], body["reason"], body["report"], body["photo_urls"]) == ("rejected", "too_many_faces", None, [])

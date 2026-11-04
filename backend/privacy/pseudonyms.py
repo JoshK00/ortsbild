@@ -9,6 +9,10 @@ class PseudonymStore(Protocol):
 
     def get_or_create(self, identifier: str, identifier_type: str) -> str: ...
 
+    def delete(self, identifier: str, identifier_type: str) -> None:
+        """Forget the pseudonym of this identifier (deleting an account)."""
+        ...
+
 
 def hash_identifier(identifier: str, identifier_type: str, secret: str) -> str:
     """Keyed hash (HMAC) of the identifier. Without the secret it cannot be reversed or guessed."""
@@ -33,3 +37,6 @@ class InMemoryPseudonymStore:
         if key not in self.pseudonyms:
             self.pseudonyms[key] = new_pseudonym()
         return self.pseudonyms[key]
+
+    def delete(self, identifier: str, identifier_type: str) -> None:
+        self.pseudonyms.pop(hash_identifier(identifier, identifier_type, self.secret), None)

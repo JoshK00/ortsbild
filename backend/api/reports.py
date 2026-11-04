@@ -1,4 +1,3 @@
-import hmac
 import io
 import logging
 import uuid
@@ -6,21 +5,26 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Path, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import JSONResponse, Response
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 import privacy.photos  # noqa: F401  (registers the HEIC reader of Pillow)
+from auth.account import delete_account
+from auth.sessions import AuthManager
+from auth.tokens import AccessClaims
 from models.incoming_report import IncomingReport
 from privacy.photo_store import PhotoStore
-from privacy.report_status import ReportStatusStore
+from privacy.pseudonyms import PseudonymStore
+from privacy.report_status import ReportRecord, ReportStatusStore
 from privacy.service import process_report
 
 logger = logging.getLogger("ortsbild.api")
 
 MAX_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
+RATE_WINDOW_SECONDS = 3600
 
 # what the file really is (detected from its content) -> (mime type, file extension)
 IMAGE_FORMATS = {
@@ -37,6 +41,8 @@ class Services:
     graph: object
     photo_store: PhotoStore
     status_store: ReportStatusStore
+    pseudonym_store: PseudonymStore
+    auth: AuthManager
 
 
 def detect_image(data: bytes) -> tuple[str, str]:
@@ -63,45 +69,76 @@ def is_not_found(error: Exception) -> bool:
     return isinstance(response, dict) and response.get("Error", {}).get("Code") in ("NoSuchKey", "404")
 
 
-def create_reports_router(get_services: Callable[[], Services], get_api_key: Callable[[], str | None]) -> APIRouter:
-    """The endpoints for reports. Every one of them needs the API key (header X-API-Key)."""
+def report_payload(record: ReportRecord) -> dict:
+    """What the app gets for a report: sanitized (with the result), blocked, rejected or still processing.
 
-    def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-        expected = get_api_key()
-        if not expected:
-            raise HTTPException(503, "the API key is not configured")  # fail closed
-        if not x_api_key or not hmac.compare_digest(x_api_key, expected):
-            raise HTTPException(401, "invalid API key")
+    A blocked report gets no reason (it is in the log and the status table). A rejected one gets a short code.
+    """
+    empty = {"id": record.report_id, "report": None, "photo_urls": []}
+    if record.status == "sanitized" and record.sanitized is not None:
+        photos = record.sanitized.get("photos", [])
+        urls = [f"/v1/reports/{record.report_id}/photos/{photo['id']}" for photo in photos]
+        return {"id": record.report_id, "status": "sanitized", "report": record.sanitized, "photo_urls": urls}
+    if record.status == "blocked_privacy":
+        return {**empty, "status": "blocked"}
+    if record.status == "rejected":
+        return {**empty, "status": "rejected", "reason": record.block_reason}
+    return {**empty, "status": "processing"}
 
-    router = APIRouter(dependencies=[Depends(require_api_key)])
+
+def create_reports_router(
+    get_services: Callable[[], Services],
+    current_user: Callable[..., AccessClaims],
+    reports_per_hour: int = 20,
+    tenant: str = "pilot",
+) -> APIRouter:
+    """The endpoints for reports and the account. Every one of them needs a signed-in user (Bearer token).
+
+    A user sees only their own reports. `tenant` is the municipality, it is set here and never taken from the client.
+    """
+    router = APIRouter(prefix="/v1")
+
+    def own_report(report_id: str, user: AccessClaims) -> ReportRecord:
+        record = get_services().status_store.get(report_id)
+        if record is None or record.user_key != user.user_key:
+            raise HTTPException(404, "no such report")  # the same answer for a foreign report, so ids cannot be probed
+        return record
 
     @router.post("/reports")
     def create_report(
+        client_report_id: str = Form(..., min_length=8, max_length=64, pattern=r"^[A-Za-z0-9-]+$"),
         lat: float = Form(..., ge=-90, le=90),
         lon: float = Form(..., ge=-180, le=180),
-        device_id: str = Form(..., min_length=1, max_length=200),
         text: str | None = Form(None, max_length=MAX_TEXT_CHARS),
         accuracy_m: float | None = Form(None, ge=0),
         photo: UploadFile | None = File(None),
+        user: AccessClaims = Depends(current_user),
     ) -> JSONResponse:
         """Take a photo and/or a text with the location, run it through the privacy layer.
 
-        Returns the sanitized report, or status "blocked" if the privacy layer stopped it.
-        TODO: Real authentication of the app instead of one shared API key.
-        TODO: Limit the number of requests per device.
+        `client_report_id` is made up by the app (a UUID) and makes a retry safe: the same id from the
+        same user returns the first result and creates nothing new.
+        Returns the sanitized report, or status "blocked" / "rejected" if the privacy layer stopped it.
         """
         services = get_services()
+        if services.status_store.count_recent(user.user_key, RATE_WINDOW_SECONDS) >= reports_per_hour:
+            raise HTTPException(429, "too many reports, try again later")
         text = text.strip() if text else None
         data = photo.file.read(MAX_PHOTO_BYTES + 1) if photo is not None else b""
         if len(data) > MAX_PHOTO_BYTES:
             raise HTTPException(413, "the photo is too big")
         if not data and not text:
             raise HTTPException(422, "send a photo or a text")
+        image = detect_image(data) if data else None
 
         report_id = uuid.uuid4().hex
+        owner_of_id = services.status_store.claim(report_id, user.user_key, client_report_id, "app", tenant)
+        if owner_of_id != report_id:  # a retry: answer with the first result, do the work only once
+            return JSONResponse(report_payload(own_report(owner_of_id, user)))
+
         photos = []
-        if data:
-            mime_type, extension = detect_image(data)
+        if image:
+            mime_type, extension = image
             raw_ref = f"raw/{report_id}/p1.{extension}"
             services.photo_store.save(raw_ref, data, mime_type)
             photos.append({"id": "p1", "mime_type": mime_type, "ref": raw_ref})
@@ -114,36 +151,29 @@ def create_reports_router(get_services: Callable[[], Services], get_api_key: Cal
                 location={"lat": lat, "lon": lon, "accuracy_m": accuracy_m, "origin": "device_gps"},
                 text=text,
                 photos=photos,
-                user={"identifier": device_id, "identifier_type": "device_id"},
+                user={"identifier": user.user_key, "identifier_type": "user_key"},
             )
         except ValidationError:
             raise HTTPException(422, "the report is not valid")
 
         result = process_report(report, services.graph, services.status_store)
-        if result.get("status") == "blocked_privacy":
-            # No reason for the client, it is in the log and in the status table
-            return JSONResponse({"id": report_id, "status": "blocked", "report": None, "photo_urls": []})
-        if result.get("status") == "rejected":
-            # The photo is gone. Only a short reason code, the app shows the advice to the user.
-            return JSONResponse(
-                {"id": report_id, "status": "rejected", "reason": result.get("reject_reason"), "report": None, "photo_urls": []}
-            )
-        sanitized = result["sanitized_report"]
-        return JSONResponse(
-            {
-                "id": report_id,
-                "status": "sanitized",
-                "report": sanitized.model_dump(mode="json"),
-                "photo_urls": [f"/reports/{report_id}/photos/{p.id}" for p in sanitized.photos],
-            }
-        )
+        if result.get("status") not in ("blocked_privacy", "rejected"):
+            services.status_store.save_sanitized(report_id, result["sanitized_report"].model_dump(mode="json"))
+        return JSONResponse(report_payload(own_report(report_id, user)))
+
+    @router.get("/reports/{report_id}")
+    def get_report(report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)) -> JSONResponse:
+        """The status and, when it is ready, the sanitized result of one of your reports."""
+        return JSONResponse(report_payload(own_report(report_id, user)))
 
     @router.get("/reports/{report_id}/photos/{photo_id}")
     def get_photo(
         report_id: str = Path(pattern=r"^[0-9a-f]{32}$"),
         photo_id: str = Path(pattern=r"^p[0-9]{1,2}$"),
+        user: AccessClaims = Depends(current_user),
     ) -> Response:
-        """The sanitized photo of a report (faces covered, no metadata). Never the raw photo."""
+        """The sanitized photo of one of your reports (faces covered, no metadata). Never the raw photo."""
+        own_report(report_id, user)
         store = get_services().photo_store
         for extension, mime_type in (("jpg", "image/jpeg"), ("png", "image/png")):
             try:
@@ -154,5 +184,12 @@ def create_reports_router(get_services: Callable[[], Services], get_api_key: Cal
                 raise
             return Response(data, media_type=mime_type, headers={"Cache-Control": "no-store"})
         raise HTTPException(404, "no such photo")
+
+    @router.delete("/account", status_code=204)
+    def delete_my_account(user: AccessClaims = Depends(current_user)) -> Response:
+        """Delete everything we hold about you: reports, photos, pseudonym and all sessions."""
+        services = get_services()
+        delete_account(user.user_key, services.status_store, services.photo_store, services.pseudonym_store, services.auth)
+        return Response(status_code=204)
 
     return router

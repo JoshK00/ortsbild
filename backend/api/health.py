@@ -10,7 +10,7 @@ from privacy.image_text import OcrEngine
 
 logger = logging.getLogger("ortsbild.api")
 
-REQUIRED_TABLES = ("pseudonyms", "reports")
+REQUIRED_TABLES = ("pseudonyms", "reports", "refresh_tokens")
 
 
 class HealthCheckError(Exception):
@@ -86,7 +86,7 @@ def s3_storage_checks(client, buckets: dict[str, str]) -> dict[str, Callable[[],
 
 
 def database_checks(dsn: str, connect=None) -> dict[str, Callable[[], None]]:
-    """The database answers and both tables of the privacy layer exist."""
+    """The database answers and the tables exist."""
     import psycopg
 
     connect = connect or psycopg.connect

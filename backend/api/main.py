@@ -9,6 +9,7 @@ from fastapi import FastAPI, Header
 from fastapi.responses import JSONResponse
 
 from api.health import CheckResult, model_checks, run_checks
+from api.auth import create_auth_router, make_current_user
 from api.reports import Services, create_reports_router
 from logging_config import setup_logging
 
@@ -20,6 +21,10 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     from dotenv import load_dotenv
 
     from api.health import database_checks, s3_storage_checks
+    from auth.apple import DEFAULT_BUNDLE_ID, AppleTokenVerifier
+    from auth.postgres_store import PostgresRefreshTokenStore
+    from auth.sessions import AuthManager
+    from auth.tokens import TokenIssuer
     from privacy.graph import build_privacy_graph, default_detectors
     from privacy.image_detectors import YuNetFaceDetector
     from privacy.image_text import RapidOcrEngine
@@ -34,16 +39,24 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     options = ImageOptions(max_faces=int(os.getenv("MAX_FACES", "10")))
     ocr_engine = RapidOcrEngine() if options.text_in_image else None
     photo_store = s3_store_from_env()
+    pseudonym_store = postgres_pseudonym_store_from_env()
 
     graph = build_privacy_graph(
         detectors,
         photo_store,
-        postgres_pseudonym_store_from_env(),
+        pseudonym_store,
         face_detector=face_detector,
         image_options=options,
         ocr_engine=ocr_engine,
     )
-    services = Services(graph, photo_store, postgres_status_store_from_env())
+    # Without AUTH_SECRET the app does not start: nobody can sign in, and there is no open fallback
+    auth = AuthManager(
+        AppleTokenVerifier(os.getenv("APPLE_BUNDLE_ID", DEFAULT_BUNDLE_ID)),
+        TokenIssuer(os.environ["AUTH_SECRET"]),
+        PostgresRefreshTokenStore(os.environ["DATABASE_URL"]),
+        os.environ["PSEUDONYM_SECRET"],
+    )
+    services = Services(graph, photo_store, postgres_status_store_from_env(), pseudonym_store, auth)
     checks = model_checks(face_detector, detectors, ocr_engine)
     checks.update(s3_storage_checks(photo_store.client, photo_store.buckets))
     checks.update(database_checks(os.environ["DATABASE_URL"]))
@@ -55,10 +68,12 @@ def create_app(
     services: Services | None = None,
     api_key: str | None = None,
     configure_logging: bool = True,
+    reports_per_hour: int | None = None,
 ) -> FastAPI:
     """Create the API. Without arguments it builds the real parts at startup.
 
-    Tests pass their own checks, services and API key and switch the logging setup off.
+    Tests pass their own checks and services and switch the logging setup off.
+    The API key only opens the details of /health, the app signs in with Apple instead.
     """
 
     @asynccontextmanager
@@ -105,10 +120,14 @@ def create_app(
             content["checks"] = {r.name: {"ok": r.ok, "detail": r.detail} for r in results}
         return JSONResponse(status_code=200 if healthy else 503, content=content)
 
+    current_user = make_current_user(lambda: app.state.services.auth)
+    app.include_router(create_auth_router(lambda: app.state.services.auth, current_user))
     app.include_router(
         create_reports_router(
             get_services=lambda: app.state.services,
-            get_api_key=current_api_key,
+            current_user=current_user,
+            reports_per_hour=reports_per_hour or int(os.getenv("MAX_REPORTS_PER_HOUR", "20")),
+            tenant=os.getenv("TENANT_ID", "pilot"),
         )
     )
     return app

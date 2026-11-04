@@ -49,7 +49,7 @@ def test_hash_depends_on_the_secret_and_the_type():
     """Without the secret nobody can recompute the hash, and the type is part of it."""
     base = hash_identifier("x", "email", "secret")
     assert base != hash_identifier("x", "email", "other-secret")
-    assert base != hash_identifier("x", "device_id", "secret")
+    assert base != hash_identifier("x", "user_key", "secret")
 
 
 # ---------------------------------------------------------------------------

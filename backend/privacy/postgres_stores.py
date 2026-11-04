@@ -3,7 +3,9 @@ import os
 import psycopg
 
 from privacy.pseudonyms import hash_identifier, new_pseudonym
-from privacy.report_status import ReportStatusRow, Status
+from psycopg.types.json import Jsonb
+
+from privacy.report_status import ReportRecord, ReportStatusRow, Status
 from privacy.retry import retry
 
 
@@ -40,6 +42,15 @@ class PostgresPseudonymStore:
 
         return retry(run, "pseudonym lookup")
 
+    def delete(self, identifier: str, identifier_type: str) -> None:
+        identifier_hash = hash_identifier(identifier, identifier_type, self.secret)
+
+        def run() -> None:
+            with self.connect(self.dsn) as connection:
+                connection.execute("delete from pseudonyms where identifier_hash = %s", (identifier_hash,))
+
+        retry(run, "pseudonym delete")
+
 
 class PostgresReportStatusStore:
     """Keeps the statuses in the PostgreSQL table `reports` (see sql/postgres/002_reports.sql)."""
@@ -72,6 +83,66 @@ class PostgresReportStatusStore:
                 ).fetchall()
 
         return [ReportStatusRow(r[0], r[1], r[2], r[3]) for r in retry(run, "report status list")]
+
+    def claim(self, report_id: str, user_key: str, client_report_id: str, source_type: str, tenant: str) -> str:
+        def run() -> str:
+            with self.connect(self.dsn) as connection:
+                # The unique index on (user_key, client_report_id) decides if this is a retry
+                connection.execute(
+                    "insert into reports (id, status, source_type, user_key, client_report_id, tenant) "
+                    "values (%s, 'processing', %s, %s, %s, %s) on conflict do nothing",
+                    (report_id, source_type, user_key, client_report_id, tenant),
+                )
+                row = connection.execute(
+                    "select id from reports where user_key = %s and client_report_id = %s",
+                    (user_key, client_report_id),
+                ).fetchone()
+            return row[0]
+
+        return retry(run, "report claim")
+
+    def save_sanitized(self, report_id: str, sanitized: dict) -> None:
+        def run() -> None:
+            with self.connect(self.dsn) as connection:
+                connection.execute(
+                    "update reports set sanitized_report = %s, updated_at = now() where id = %s",
+                    (Jsonb(sanitized), report_id),
+                )
+
+        retry(run, "sanitized report save")
+
+    def get(self, report_id: str) -> ReportRecord | None:
+        def run():
+            with self.connect(self.dsn) as connection:
+                return connection.execute(
+                    "select id, user_key, status, block_reason, sanitized_report from reports where id = %s",
+                    (report_id,),
+                ).fetchone()
+
+        row = retry(run, "report read")
+        return ReportRecord(*row) if row else None
+
+    def count_recent(self, user_key: str, seconds: int) -> int:
+        def run() -> int:
+            with self.connect(self.dsn) as connection:
+                return connection.execute(
+                    "select count(*) from reports where user_key = %s "
+                    "and created_at > now() - make_interval(secs => %s)",
+                    (user_key, seconds),
+                ).fetchone()[0]
+
+        return retry(run, "report count")
+
+    def delete_user(self, user_key: str) -> list[ReportRecord]:
+        def run():
+            with self.connect(self.dsn) as connection:
+                return connection.execute(
+                    "delete from reports where user_key = %s "
+                    "returning id, user_key, status, block_reason, sanitized_report",
+                    (user_key,),
+                ).fetchall()
+
+        return [ReportRecord(*row) for row in retry(run, "report delete")]
 
 
 def postgres_pseudonym_store_from_env() -> PostgresPseudonymStore:

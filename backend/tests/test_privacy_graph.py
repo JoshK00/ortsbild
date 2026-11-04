@@ -17,7 +17,7 @@ def make_report(**overrides) -> IncomingReport:
         "location": {"lat": 48.1371, "lon": 11.5754},
         "text": "The bin at the bus stop is overflowing.",
         "photos": [{"id": "p1", "mime_type": "image/jpeg", "ref": "raw/7c9e/p1.jpg"}],
-        "user": {"identifier": "device-1", "identifier_type": "device_id"},
+        "user": {"identifier": "key-1", "identifier_type": "user_key"},
     }
     data.update(overrides)
     return IncomingReport(**data)

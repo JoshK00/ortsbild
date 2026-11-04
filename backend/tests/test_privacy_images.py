@@ -170,7 +170,7 @@ def make_report(text=None):
         location={"lat": 48.1371, "lon": 11.5754},
         text=text,
         photos=[{"id": "p1", "mime_type": "image/jpeg", "ref": "raw/7c9e/p1.jpg"}],
-        user={"identifier": "device-1", "identifier_type": "device_id"},
+        user={"identifier": "key-1", "identifier_type": "user_key"},
     )
 
 

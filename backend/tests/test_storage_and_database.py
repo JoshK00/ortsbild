@@ -1,10 +1,14 @@
+from datetime import datetime, timezone
+
 import boto3
 import botocore.exceptions
 import psycopg
 import pytest
 from moto import mock_aws
 
-from api.health import HealthCheckError, database_checks, run_checks, s3_storage_checks
+from api.health import database_checks, run_checks, s3_storage_checks
+from auth.postgres_store import PostgresRefreshTokenStore
+from auth.sessions import RefreshRecord, hash_token
 from privacy.photo_store import S3PhotoStore
 from privacy.postgres_stores import PostgresPseudonymStore, PostgresReportStatusStore
 from privacy.retry import is_transient_error
@@ -153,6 +157,59 @@ def test_postgres_status_store_lists_blocked_reports():
     assert (row.report_id, row.source_type, row.block_reason) == ("a", "email", "sanitize_text: RuntimeError")
 
 
+def test_postgres_claim_returns_the_id_that_owns_the_client_report_id():
+    """A new report returns its own id, a retry returns the first one (decided by the unique index)."""
+    log = []
+    store = PostgresReportStatusStore("dsn", fake_connect(log, [[], [("first-id",)]]))
+    assert store.claim("new-id", "key-1", "client-1", "app", "pilot") == "first-id"
+    assert "on conflict do nothing" in log[0][0]
+    assert log[0][1] == ("new-id", "app", "key-1", "client-1", "pilot")
+
+
+def test_postgres_status_store_reads_a_record_and_deletes_a_user():
+    row = ("a" * 32, "key-1", "sanitized", None, {"photos": []})
+    store = PostgresReportStatusStore("dsn", fake_connect([], [[row]]))
+    assert store.get("a" * 32).user_key == "key-1"
+    [deleted] = PostgresReportStatusStore("dsn", fake_connect([], [[row]])).delete_user("key-1")
+    assert deleted.sanitized == {"photos": []}
+
+
+def test_postgres_status_store_counts_the_recent_reports_of_a_user():
+    log = []
+    assert PostgresReportStatusStore("dsn", fake_connect(log, [[(3,)]])).count_recent("key-1", 3600) == 3
+    assert log[0][1] == ("key-1", 3600)
+
+
+def test_postgres_pseudonym_delete_uses_the_hash_only():
+    log = []
+    PostgresPseudonymStore("dsn", "secret", fake_connect(log, [])).delete("key-1", "user_key")
+    assert "delete from pseudonyms" in log[0][0] and "key-1" not in str(log)
+
+
+def test_postgres_refresh_token_store_marks_a_token_used_only_once():
+    """The update only matches an unused token, so of two parallel refreshes only one wins."""
+    log = []
+    assert PostgresRefreshTokenStore("dsn", fake_connect(log, [[("id-1",)]])).mark_used("id-1") is True
+    assert "used_at is null" in log[0][0]
+    assert PostgresRefreshTokenStore("dsn", fake_connect([], [[]])).mark_used("id-1") is False
+
+
+def test_postgres_refresh_token_store_keeps_the_hash_not_the_token():
+    log = []
+    record = RefreshRecord("id-1", "s-1", "key-1", hash_token("the-refresh-token"), datetime(2030, 1, 1, tzinfo=timezone.utc))
+    PostgresRefreshTokenStore("dsn", fake_connect(log, [])).add(record)
+    assert "the-refresh-token" not in str(log) and hash_token("the-refresh-token") in str(log)
+
+
+def test_postgres_refresh_token_store_finds_a_token_and_checks_the_session():
+    when = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    row = ("id-1", "s-1", "key-1", "hash", when, None, None)
+    assert PostgresRefreshTokenStore("dsn", fake_connect([], [[row]])).find("hash").session_id == "s-1"
+    assert PostgresRefreshTokenStore("dsn", fake_connect([], [[]])).find("nope") is None
+    assert PostgresRefreshTokenStore("dsn", fake_connect([], [[(1,)]])).session_active("s-1") is True
+    assert PostgresRefreshTokenStore("dsn", fake_connect([], [[]])).session_active("s-1") is False
+
+
 # ---------------------------------------------------------------------------
 # Health checks
 # ---------------------------------------------------------------------------
@@ -172,12 +229,12 @@ def test_storage_health_names_the_missing_bucket(s3):
 
 def test_database_health_lists_missing_tables():
     """The check says which tables are missing and what to do."""
-    connect = fake_connect([], [[("pseudonyms",)]])
+    connect = fake_connect([], [[("pseudonyms",), ("refresh_tokens",)]])
     [result] = run_checks(database_checks("dsn", connect))
     assert result.detail == "missing table: reports, run the SQL files"
 
 
-def test_database_health_passes_when_both_tables_exist():
-    """Both tables are there."""
-    connect = fake_connect([], [[("pseudonyms",), ("reports",)]])
+def test_database_health_passes_when_all_tables_exist():
+    """All tables are there."""
+    connect = fake_connect([], [[("pseudonyms",), ("reports",), ("refresh_tokens",)]])
     assert all(r.ok for r in run_checks(database_checks("dsn", connect)))
