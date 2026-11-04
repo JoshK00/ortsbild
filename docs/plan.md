@@ -34,11 +34,11 @@ iOS refuses plain HTTP, and until then photos and the API key travel unencrypted
 
 | # | What | Owner | Effort | Done when |
 |---|---|---|---|---|
-| 1.1 | A hostname for the Cube. Options: **free** hostname that points to the IP (for example `217-154-175-68.sslip.io`, no signup, works at once), a free named one (DuckDNS), or a **real domain** (a few euros a year, better for real operation). Point it to `217.154.175.68` | You | S | `nslookup` shows the IP |
-| 1.2 | Put the domain into `SITE_ADDRESS` in `.env.prod`, restart Caddy, check the certificate | You, Claude | S | `https://<domain>/health` shows ok |
+| 1.1 | ~~A hostname for the Cube~~ **Done:** `217-154-175-68.sslip.io`. (Options were: Options: **free** hostname that points to the IP (for example `217-154-175-68.sslip.io`, no signup, works at once), a free named one (DuckDNS), or a **real domain** (a few euros a year, better for real operation). Point it to `217.154.175.68`) | You | S | done |
+| 1.2 | ~~Put the name into `SITE_ADDRESS`, restart Caddy, check the certificate~~ **Done** | Claude | S | `https://217-154-175-68.sslip.io/health` shows ok (certificate until 2027-02-02) |
 | 1.3 | Create a **new** API key and swap it (the old one travelled over HTTP) | Claude | S | old key gives 401 |
 | 1.4 | Restrict `/health` (it names our checks), keep it usable for monitoring | Claude | S | only a monitor token or a short answer is public |
-| 1.5 | Close the port 80 except for the certificate | Claude | S | HTTP redirects to HTTPS |
+| 1.5 | ~~HTTP redirects to HTTPS~~ **Done** (Caddy answers 308) | Claude | S | done |
 
 ## Phase 2: Connect the app (the iPhone test)
 
