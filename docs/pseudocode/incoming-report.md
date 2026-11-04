@@ -25,8 +25,8 @@ IncomingReport
   photos: list[Photo]          # may be empty (email without attachments)
     id, mime_type, ref
   user:
-    identifier: str            # plain identifier (email, device id), for the privacy agent ONLY
-    identifier_type: "email" | "device_id"
+    identifier: str            # plain identifier (email, user key), for the privacy agent ONLY
+    identifier_type: "email" | "user_key"
 ```
 
 Same schema for every source. Sources differ only in which optional fields are filled (text, photos), never in structure.

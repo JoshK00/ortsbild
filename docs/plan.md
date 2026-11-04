@@ -1,10 +1,10 @@
 # Plan: everything that is still open
 
-Status: 2026-10-29. Sorted by what blocks what. Effort: S = under an hour, M = a few hours, L = a day or more.
+Status: 2026-11-04. Sorted by what blocks what. Effort: S = under an hour, M = a few hours, L = a day or more.
 Owner: **You** = needs your accounts or your decision, **Claude** = can be built here, **Team** = needs the team or an expert.
 
-The backend runs on the IONOS Cube and passed a first end-to-end test (text, single face, crowd photo).
-What is missing for a real test on an iPhone is the connection of the app and HTTPS.
+The backend runs on the IONOS Cube behind HTTPS, with Sign in with Apple, and the app is connected to it (2026-11-04).
+Open: the test with real photos on the iPhone, and everything behind the privacy layer (next: classification, see [classification-plan.md](classification-plan.md)).
 
 ## The critical path to the first iPhone test
 
@@ -44,12 +44,13 @@ iOS refuses plain HTTP, and until then photos and the API key travel unencrypted
 
 | # | What | Owner | Effort | Done when |
 |---|---|---|---|---|
-| 2.1 | `BackendReportService` in the app (multipart upload to `POST /reports`, the `ReportService` protocol already exists) | Claude | M | the app talks to the server |
-| 2.2 | Ask for the location (`NSLocationWhenInUseUsageDescription`), it is mandatory in the report | Claude | S | coordinates are sent |
-| 2.3 | Convert the photo to JPEG before the upload (also settles the HEIC license question) | Claude | S | server receives JPEG |
-| 2.4 | A stable device id (random id in the Keychain) as `device_id` | Claude | S | same id after restart |
-| 2.5 | Base URL and API key as a local setting that is not in git | Claude | S | no key in the repository |
-| 2.6 | Show the answer in the chat: sanitized text, the cleaned photo, the line "Daten anonymisiert"; handle `blocked` and `rejected` with a clear German message | Claude | M | the three outcomes look right |
+| 2.0 | ~~Backend for the app: Sign in with Apple, own sessions, `POST /v1/reports` with `client_report_id`, owner checks, limit per user, delete account~~ **Done**, deployed on the server (migration `004`, `AUTH_SECRET`) | Claude | L | tests green, server updated |
+| 2.1 | ~~`BackendReportService` in the app (multipart upload to `POST /v1/reports`, the `ReportService` protocol already exists)~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | M | the app talks to the server |
+| 2.2 | ~~Ask for the location (`NSLocationWhenInUseUsageDescription`), it is mandatory in the report~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | S | coordinates are sent |
+| 2.3 | ~~Convert the photo to JPEG before the upload (also settles the HEIC license question)~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | S | server receives JPEG |
+| 2.4 | ~~Sign in with Apple in the app (button with nonce), the tokens in the Keychain, refresh on 401, restore the session at launch~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | M | same session after a restart |
+| 2.5 | ~~Base URL as a setting (no key in the app any more, nothing secret ships with it)~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | S | no secret in the repository or the app |
+| 2.6 | ~~Show the answer in the chat: sanitized text, the cleaned photo, the line "Daten anonymisiert"; handle `blocked` and `rejected` with a clear German message~~ **Done** (built, compiles without warnings; the real test is 2.7) | Claude | M | the three outcomes look right |
 | 2.7 | Install on your iPhone (Xcode, signing with your Apple ID) and test with a photo and a text | You | M | you see the sanitized result in the chat |
 
 ## Phase 3: Safety net for faces and text in photos (parallel to phase 2)
@@ -73,7 +74,7 @@ The face detector misses faces that are cut off, turned away or tiny (seen on th
 | 4.1 | Consent screen at first start, privacy notice with a URL, rules for testers (no people, no children, no private property) | Claude, Team | M | in the app and in TestFlight |
 | 4.2 | Deletion concept: how long clean photos and pseudonyms are kept, backups, a delete button in the app | Team, Claude | M | written down and built |
 | 4.3 | DPA (AVV) with IONOS, data protection sign-off by an expert: pseudonyms as personal data, plates, training data of YuNet and GLiNER2-PII, movement profile by many exact locations | Team | L | signed or answered |
-| 4.4 | **Sign in with Apple** instead of the shared API key (decided 2026-11-04, developer membership exists, the capability is already in the Xcode project). Steps: 4.4a verify the Apple identity token (**done**, `backend/auth/apple.py`), 4.4b our own session tokens (short access token, refresh token with rotation in the database), 4.4c `POST /auth/apple` and the check on the report endpoints, 4.4d identifier type `apple_sub` in the data model, 4.4e the app side (button, Keychain), 4.4f delete the account in the app and revoke the token at Apple (App Store rule), 4.4g a limit of requests per user | Claude | L | a stolen key alone is not enough, every user has an own revocable session |
+| 4.4 | **Sign in with Apple** instead of the shared API key (decided 2026-11-04, developer membership exists, the capability is already in the Xcode project). Steps: 4.4a verify the Apple identity token (**done**, `backend/auth/apple.py`), 4.4b our own session tokens (**done**: access token 1 h, refresh token 30 days with rotation and reuse detection), 4.4c `POST /v1/auth/apple` and the check on the report endpoints (**done**), 4.4d identifier type `user_key` in the data model (**done**), 4.4e the app side (button, Keychain; phase 2.4), 4.4f delete the account (**done** on the server; still open: the delete button in the app and revoking the token at Apple, which needs a key (`.p8`) from the developer account, App Store rule), 4.4g a limit of requests per user (**done**: reports per hour; still open: a limit for the login endpoint and for parallel photo processing) | Claude | L | a stolen key alone is not enough, every user has an own revocable session |
 | 4.5 | Least privilege: own database user, a restricted storage key with a bucket policy instead of the admin key | You, Claude | M | no admin rights in production |
 | 4.6 | Backups of PostgreSQL (dump to the object storage), a test of restoring | Claude | M | restore proven |
 | 4.7 | Monitoring: uptime check on `/health`, the log to a safe place with alerts | Claude, You | M | alert reaches you |
@@ -89,7 +90,7 @@ Waits for the architecture overview of the team.
 | # | What | Owner | Effort |
 |---|---|---|---|
 | 5.1 | Architecture overview of the team replaces section 3 of the documentation, order and scope of agents 3 to 7 | Team | M |
-| 5.2 | Agent 1: classification of the sanitized report (category, lane, emergency) with the model provider chosen for it | Claude, Team | L |
+| 5.2 | Agent 1: classification of the sanitized report (category, lane, emergency) with the model provider chosen for it. Detail plan: [classification-plan.md](classification-plan.md) | Claude, Team | L |
 | 5.3 | Choose the model provider for the agents after the privacy layer (EU API, DPA, endpoint hard-wired) | Team | M |
 | 5.4 | Research agent (responsible authority and channel), drafting agent, policy code with levels | Claude, Team | L |
 | 5.5 | Duplicate check by location (PostGIS image instead of the plain Postgres) | Claude | M |
@@ -107,6 +108,6 @@ See [model-license.md](model-license.md): `make notices`, license texts, remove 
 
 ## The next three actions
 
-1. **You:** 0.1 and 0.2 (secret rotation and cost alert), they take minutes.
-2. **You:** 1.1, get a domain. Everything after it depends on it.
-3. **Claude:** 2.1 to 2.6 (the app connection) while the domain is being set up, so the iPhone test can start as soon as HTTPS runs.
+1. **You:** 2.7, the test on the iPhone with real photos (text with a phone number, a photo without people, a photo with one face), and tell what you see. Also 0.2, the cost alert at IONOS.
+2. **You, Team:** decisions D2 to D5 of [classification-plan.md](classification-plan.md) (categories, lane, emergency, name).
+3. **Claude:** C1 and C2 of the classification plan (contract, provider interface with a fake provider), then the evaluation set.
