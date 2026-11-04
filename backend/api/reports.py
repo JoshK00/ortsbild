@@ -78,13 +78,13 @@ def report_payload(record: ReportRecord) -> dict:
     if it does not exist (yet). A blocked report gets no reason (it is in the log and the status table).
     A rejected one gets a short code.
     """
-    empty = {"id": record.report_id, "report": None, "photo_urls": [], "classification": None, "research": None}
-    if record.status in ("sanitized", "classified", "researched") and record.sanitized is not None:
+    empty = {"id": record.report_id, "report": None, "photo_urls": [], "classification": None, "research": None, "draft": None}
+    if record.status in ("sanitized", "classified", "researched", "drafted") and record.sanitized is not None:
         photos = record.sanitized.get("photos", [])
         urls = [f"/v1/reports/{record.report_id}/photos/{photo['id']}" for photo in photos]
         return {
             "id": record.report_id, "status": "sanitized", "report": record.sanitized,
-            "photo_urls": urls, "classification": record.classification, "research": record.research,
+            "photo_urls": urls, "classification": record.classification, "research": record.research, "draft": record.draft,
         }
     if record.status == "blocked_privacy":
         return {**empty, "status": "blocked"}

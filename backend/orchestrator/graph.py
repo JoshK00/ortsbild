@@ -4,6 +4,8 @@ from langgraph.graph import END, START, StateGraph
 
 from classification.models import Classification
 from classification.service import Classifier
+from drafting.models import Draft
+from drafting.service import Drafter
 from models.incoming_report import IncomingReport
 from models.sanitized_report import SanitizedReport
 from privacy.report_status import ReportStatusStore
@@ -25,6 +27,7 @@ class ReportState(TypedDict, total=False):
     sanitized_report: SanitizedReport  # from here on this is the only form of the report
     classification: Classification | None  # None if the classification failed, it is repeated later
     research: ResearchResult | None  # None if no authority was found, the user adds the recipient
+    draft: Draft | None  # None if no draft was written (no defect, or the provider failed)
 
 
 def make_privacy_node(privacy_graph, status_store: ReportStatusStore):
@@ -66,6 +69,19 @@ def make_research_node(researcher: Researcher, status_store: ReportStatusStore):
     return research_node
 
 
+def make_draft_node(drafter: Drafter, status_store: ReportStatusStore):
+    """The fourth stage: the message for the user to approve. It works with or without an authority."""
+
+    def draft_node(state: ReportState) -> dict:
+        report = state["sanitized_report"]
+        draft = drafter.draft(report, state["classification"], state.get("research"))
+        if draft is not None:
+            status_store.save_draft(report.id, draft.model_dump(mode="json"))
+        return {"draft": draft}
+
+    return draft_node
+
+
 def after_classify(state: ReportState) -> str:
     """Only a classified report that is no emergency is researched. An emergency gets the hint to call 110 / 112, no ticket."""
     classification = state.get("classification")
@@ -77,12 +93,13 @@ def after_privacy(state: ReportState) -> str:
     return "classify" if "sanitized_report" in state else END
 
 
-def build_report_graph(privacy_graph, classifier: Classifier, researcher: Researcher, status_store: ReportStatusStore):
+def build_report_graph(
+    privacy_graph, classifier: Classifier, researcher: Researcher, drafter: Drafter, status_store: ReportStatusStore
+):
     """The orchestrator: the stages of one report, in order.
 
-    TODO: Add the next stages behind `research`, each as one more node with a router in front of it:
-    duplicate check, policy code, drafting, the approval pause (a LangGraph interrupt) and sending
-    (docs/documentation.md, section 3).
+    TODO: Add the next stages, each as one more node with a router in front of it: the duplicate check (before the
+    research), the policy code, the approval pause (a LangGraph interrupt) and the sending (docs/documentation.md, section 3).
     """
     graph = StateGraph(ReportState)
     graph.add_node("privacy", make_privacy_node(privacy_graph, status_store))
@@ -91,5 +108,7 @@ def build_report_graph(privacy_graph, classifier: Classifier, researcher: Resear
     graph.add_conditional_edges("privacy", after_privacy, {"classify": "classify", END: END})
     graph.add_node("research", make_research_node(researcher, status_store))
     graph.add_conditional_edges("classify", after_classify, {"research": "research", END: END})
-    graph.add_edge("research", END)
+    graph.add_node("draft", make_draft_node(drafter, status_store))
+    graph.add_edge("research", "draft")
+    graph.add_edge("draft", END)
     return graph.compile()

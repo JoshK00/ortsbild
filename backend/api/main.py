@@ -27,6 +27,8 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     from auth.tokens import TokenIssuer
     from classification.provider import provider_from_env
     from classification.service import Classifier
+    from drafting.provider import provider_from_env as draft_provider_from_env
+    from drafting.service import Drafter
     from orchestrator.graph import build_report_graph
     from research.postgres_registry import PostgresRegistryStore
     from research.provider import provider_from_env as research_provider_from_env
@@ -57,7 +59,8 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     )
     status_store = postgres_status_store_from_env()
     researcher = Researcher(PostgresRegistryStore(os.environ["DATABASE_URL"]), research_provider_from_env())
-    graph = build_report_graph(privacy_graph, Classifier(provider_from_env(), photo_store), researcher, status_store)
+    drafter = Drafter(draft_provider_from_env())
+    graph = build_report_graph(privacy_graph, Classifier(provider_from_env(), photo_store), researcher, drafter, status_store)
 
     # Without AUTH_SECRET the app does not start: nobody can sign in, and there is no open fallback
     auth = AuthManager(

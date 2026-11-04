@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-Status = Literal["processing", "sanitized", "classified", "researched", "blocked_privacy", "rejected"]
+Status = Literal["processing", "sanitized", "classified", "researched", "drafted", "blocked_privacy", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,7 @@ class ReportRecord:
     sanitized: dict | None = None
     classification: dict | None = None
     research: dict | None = None  # the responsible authority and its sources, None if none was found
+    draft: dict | None = None  # the message for the user to approve, None if none was written
 
 
 class ReportStatusStore(Protocol):
@@ -60,6 +61,10 @@ class ReportStatusStore(Protocol):
         """Keep the result of the research and move the report to the status `researched`."""
         ...
 
+    def save_draft(self, report_id: str, draft: dict) -> None:
+        """Keep the draft and move the report to the status `drafted`."""
+        ...
+
     def get(self, report_id: str) -> ReportRecord | None: ...
 
     def count_recent(self, user_key: str, seconds: int) -> int:
@@ -81,6 +86,7 @@ class InMemoryReportStatusStore:
         self.sanitized: dict[str, dict] = {}
         self.classifications: dict[str, dict] = {}
         self.research: dict[str, dict] = {}
+        self.drafts: dict[str, dict] = {}
         self.started_at: dict[str, float] = {}  # report id -> time.monotonic()
 
     def set_status(
@@ -114,6 +120,11 @@ class InMemoryReportStatusStore:
         row = self.rows[report_id]
         self.rows[report_id] = ReportStatusRow(report_id, "researched", row.source_type, row.block_reason)
 
+    def save_draft(self, report_id: str, draft: dict) -> None:
+        self.drafts[report_id] = draft
+        row = self.rows[report_id]
+        self.rows[report_id] = ReportStatusRow(report_id, "drafted", row.source_type, row.block_reason)
+
     def get(self, report_id: str) -> ReportRecord | None:
         row = self.rows.get(report_id)
         if row is None:
@@ -121,6 +132,7 @@ class InMemoryReportStatusStore:
         return ReportRecord(
             report_id, self.owners.get(report_id), row.status, row.block_reason,
             self.sanitized.get(report_id), self.classifications.get(report_id), self.research.get(report_id),
+            self.drafts.get(report_id),
         )
 
     def count_recent(self, user_key: str, seconds: int) -> int:
@@ -135,6 +147,7 @@ class InMemoryReportStatusStore:
             self.sanitized.pop(rid, None)
             self.classifications.pop(rid, None)
             self.research.pop(rid, None)
+            self.drafts.pop(rid, None)
             self.started_at.pop(rid, None)
             self.owners.pop(rid, None)
         self.client_ids = {k: v for k, v in self.client_ids.items() if k[0] != user_key}

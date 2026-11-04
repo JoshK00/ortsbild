@@ -4,6 +4,8 @@ from api.main import create_app
 from api.reports import Services
 from classification.provider import RuleBasedProvider
 from classification.service import Classifier
+from drafting.provider import TemplateDraftProvider
+from drafting.service import Drafter
 from orchestrator.graph import build_report_graph
 from tests.auth_helpers import make_auth_manager, sign_in
 from privacy.detectors import PatternDetector
@@ -84,7 +86,7 @@ def test_api_answers_rejected_with_a_reason_code_only():
         [PatternDetector()], photo_store, InMemoryPseudonymStore("s"),
         face_detector=Faces(12), image_options=ImageOptions(max_faces=10),
     )
-    graph = build_report_graph(privacy_graph, Classifier(RuleBasedProvider(), photo_store), Researcher(InMemoryRegistryStore(), None), status_store)
+    graph = build_report_graph(privacy_graph, Classifier(RuleBasedProvider(), photo_store), Researcher(InMemoryRegistryStore(), None), Drafter(TemplateDraftProvider()), status_store)
     app = create_app(checks={}, services=Services(graph, photo_store, status_store, InMemoryPseudonymStore("s"), make_auth_manager()[0]), configure_logging=False)
     with TestClient(app) as client:
         response = client.post("/v1/reports", data=FORM, files={"photo": ("p.jpg", make_jpeg(size=(80, 20)), "image/jpeg")}, headers=sign_in(client))

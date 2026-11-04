@@ -167,7 +167,7 @@ def test_postgres_claim_returns_the_id_that_owns_the_client_report_id():
 
 
 def test_postgres_status_store_reads_a_record_and_deletes_a_user():
-    row = ("a" * 32, "key-1", "sanitized", None, {"photos": []}, None)
+    row = ("a" * 32, "key-1", "sanitized", None, {"photos": []}, None, None, None)
     store = PostgresReportStatusStore("dsn", fake_connect([], [[row]]))
     assert store.get("a" * 32).user_key == "key-1"
     [deleted] = PostgresReportStatusStore("dsn", fake_connect([], [[row]])).delete_user("key-1")
@@ -246,3 +246,16 @@ def test_postgres_status_store_saves_the_classification_and_moves_the_status():
     sql, params = log[0]
     assert "status = 'classified'" in sql and "classification = %s" in sql
     assert params[1] == "a" * 32
+
+
+def test_postgres_status_store_saves_the_draft_and_moves_the_status():
+    log = []
+    PostgresReportStatusStore("dsn", fake_connect(log, [])).save_draft("a" * 32, {"subject": "s"})
+    sql, params = log[0]
+    assert "status = 'drafted'" in sql and "draft = %s" in sql and params[1] == "a" * 32
+
+
+def test_postgres_status_store_saves_the_research_and_moves_the_status():
+    log = []
+    PostgresReportStatusStore("dsn", fake_connect(log, [])).save_research("a" * 32, {"authority": "a"})
+    assert "status = 'researched'" in log[0][0]

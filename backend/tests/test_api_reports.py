@@ -7,6 +7,8 @@ from api.main import create_app
 from api.reports import MAX_PHOTO_BYTES, Services
 from classification.provider import RuleBasedProvider
 from classification.service import Classifier
+from drafting.provider import TemplateDraftProvider
+from drafting.service import Drafter
 from orchestrator.graph import build_report_graph
 from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
@@ -42,7 +44,7 @@ class BrokenDetector:
 class Env:
     """The app with in-memory parts, and the parts to look into."""
 
-    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None):
+    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None, draft_provider=None):
         self.photo_store, self.status_store = InMemoryPhotoStore(), InMemoryReportStatusStore()
         self.pseudonym_store = InMemoryPseudonymStore("s")
         self.auth, self.token_store = make_auth_manager()
@@ -52,7 +54,8 @@ class Env:
         )
         self.registry = InMemoryRegistryStore()
         researcher = Researcher(self.registry, research_provider)
-        graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), researcher, self.status_store)
+        drafter = Drafter(draft_provider or TemplateDraftProvider())
+        graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), researcher, drafter, self.status_store)
         services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth)
         self.client = TestClient(create_app(checks={}, services=services, api_key="k", configure_logging=False, reports_per_hour=reports_per_hour))
 
@@ -146,7 +149,7 @@ def test_text_report_is_sanitized_and_returned():
         assert response.status_code == 200 and body["status"] == "sanitized"
         assert body["report"]["text"] == "Pothole, call <PHONE>"
         assert body["report"]["pseudonym"].startswith("rep-")
-        assert env.status_store.rows[body["id"]].status == "classified"
+        assert env.status_store.rows[body["id"]].status == "classified"  # category other: no defect, so no research and no draft
 
 
 def test_photo_report_returns_a_clean_photo_and_deletes_the_raw_one():
@@ -386,7 +389,7 @@ def test_a_report_comes_back_with_its_classification():
     assert body["status"] == "sanitized"
     assert body["classification"]["category"] == "pothole"
     assert set(body["classification"]) == {"category", "lane", "emergency", "confidence"}
-    assert env.status_store.rows[body["id"]].status == "classified"
+    assert env.status_store.rows[body["id"]].status == "drafted"  # the chain ends with the draft
 
 
 def test_the_classification_is_stored_and_read_again_by_the_owner():
@@ -470,7 +473,7 @@ def test_the_authority_comes_back_with_the_report():
         body = env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE}).json()
     assert body["research"]["authority"] == "Baureferat Tiefbau" and body["research"]["channel"]["target"] == "tiefbau@muenchen.de"
     assert body["research"]["sources"] == ["https://www.muenchen.de/kontakt"]
-    assert env.status_store.rows[body["id"]].status == "researched"
+    assert env.status_store.rows[body["id"]].status == "drafted"
 
 
 def test_the_place_is_stored_with_the_location_and_returned():
@@ -550,3 +553,81 @@ def test_deleting_the_account_removes_the_research_of_the_user_but_keeps_the_reg
         env.post({"text": "Schlagloch", **PLACE}, headers=headers)
         env.client.delete("/v1/account", headers=headers)
     assert env.status_store.research == {} and len(env.registry.entries) == 1
+
+
+# ---------------------------------------------------------------------------
+# The draft in the chain
+# ---------------------------------------------------------------------------
+
+
+class RecordingDraftProvider:
+    """Remembers what it was sent, so the tests can look at what leaves the server."""
+
+    def __init__(self):
+        self.seen = []
+
+    def draft(self, data):
+        self.seen.append(data)
+        return TemplateDraftProvider().draft(data)
+
+
+def test_the_draft_comes_back_with_the_report_and_holds_authority_contact_and_location():
+    with Env(research_provider=ScriptedResearchProvider(FOUND)) as env:
+        body = env.post({"text": "Großes Schlagloch auf dem Radweg", "lat": "48.13712", "lon": "11.57541", **PLACE}).json()
+    draft = body["draft"]
+    assert draft["authority"] == "Baureferat Tiefbau" and draft["contact"]["target"] == "tiefbau@muenchen.de" and draft["language"] == "de"
+    assert "Standort / Location: Hauptstraße 12, München, DE | 48.13712, 11.57541" in draft["body"] and draft["subject"] and draft["summary_de"]
+    assert env.status_store.rows[body["id"]].status == "drafted"
+
+
+def test_the_draft_is_written_even_without_an_authority():
+    with Env() as env:  # no research provider
+        body = env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE}).json()
+    assert body["research"] is None and body["draft"]["authority"] is None and body["draft"]["contact"] is None
+
+
+def test_no_draft_for_an_emergency_or_for_a_report_that_is_no_defect():
+    provider = RecordingDraftProvider()
+    with Env(draft_provider=provider) as env:
+        emergency = env.post({"text": "Auto brennt vor dem Haus", **PLACE}).json()
+        other = env.post({"text": "Wann fährt der nächste Bus?", "client_report_id": "report-0002"}).json()
+    assert emergency["draft"] is None and other["draft"] is None and provider.seen == []
+
+
+def test_the_drafting_model_gets_only_the_sanitized_text_the_category_and_the_authority():
+    provider = RecordingDraftProvider()
+    with Env(research_provider=ScriptedResearchProvider(FOUND), draft_provider=provider) as env:
+        env.post({"text": "Großes Schlagloch, ruf mich an unter 0151 2345678", "lat": "48.13712", "lon": "11.57541", **PLACE}, user="anna")
+    [data] = provider.seen
+    assert data.text == "Großes Schlagloch, ruf mich an unter <PHONE>" and data.authority == "Baureferat Tiefbau"
+    seen = repr(data)
+    assert "0151" not in seen and "Hauptstraße" not in seen and "48.137" not in seen and "anna" not in seen
+
+
+def test_a_failing_draft_does_not_break_the_report():
+    class Broken:
+        def draft(self, data):
+            raise RuntimeError("model down: secret")
+
+    with Env(draft_provider=Broken(), research_provider=ScriptedResearchProvider(FOUND)) as env:
+        response = env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE})
+    body = response.json()
+    assert response.status_code == 200 and body["draft"] is None and body["research"] is not None and "secret" not in response.text
+
+
+def test_the_owner_reads_the_draft_again_and_a_retry_does_not_write_a_second_one():
+    provider = RecordingDraftProvider()
+    with Env(draft_provider=provider) as env:
+        headers = env.login()
+        first = env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE}, headers=headers).json()
+        again = env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE}, headers=headers).json()
+        read = env.client.get(f"/v1/reports/{first['id']}", headers=headers).json()
+    assert again == first and read["draft"] == first["draft"] and len(provider.seen) == 1
+
+
+def test_deleting_the_account_removes_the_draft():
+    with Env() as env:
+        headers = env.login()
+        env.post({"text": "Großes Schlagloch auf dem Radweg", **PLACE}, headers=headers)
+        env.client.delete("/v1/account", headers=headers)
+    assert env.status_store.drafts == {}

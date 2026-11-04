@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from classification.models import Classification
 from classification.provider import RuleBasedProvider
 from classification.service import Classifier
+from drafting.provider import TemplateDraftProvider
+from drafting.service import Drafter
 from models.incoming_report import IncomingReport
 from orchestrator.graph import build_report_graph
 from privacy.detectors import PatternDetector
@@ -49,7 +51,7 @@ def make_report(text="Schlagloch auf dem Radweg"):
 def build(detector=None):
     order, store, photos = Order(), InMemoryReportStatusStore(), InMemoryPhotoStore()
     privacy = build_privacy_graph([detector or PatternDetector()], photos, InMemoryPseudonymStore("s"))
-    graph = build_report_graph(privacy, Classifier(RecordingProvider(order), photos), Researcher(InMemoryRegistryStore(), None), store)
+    graph = build_report_graph(privacy, Classifier(RecordingProvider(order), photos), Researcher(InMemoryRegistryStore(), None), Drafter(TemplateDraftProvider()), store)
     return graph, store, order
 
 
@@ -58,7 +60,7 @@ def test_a_clean_report_is_sanitized_then_classified():
     result = graph.invoke({"report": make_report()})
     assert result["sanitized_report"].text == "Schlagloch auf dem Radweg"
     assert isinstance(result["classification"], Classification) and result["classification"].category == "pothole"
-    assert store.rows["7c9e"].status == "classified"
+    assert store.rows["7c9e"].status == "drafted"  # the chain ends with the draft
     assert store.get("7c9e").classification["category"] == "pothole"
     assert store.get("7c9e").sanitized["pseudonym"].startswith("rep-")
 
