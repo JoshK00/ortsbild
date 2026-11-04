@@ -65,5 +65,5 @@ def provider_from_env() -> ClassificationProvider:
     if name == "anthropic":
         from classification.claude import DEFAULT_MODEL, ClaudeProvider
 
-        return ClaudeProvider(os.environ["ANTHROPIC_API_KEY"], os.getenv("ANTHROPIC_CLASSIFICATION_MODEL", DEFAULT_MODEL))
+        return ClaudeProvider(os.environ["ANTHROPIC_KEY"], os.getenv("ANTHROPIC_CLASSIFICATION_MODEL", DEFAULT_MODEL))
     raise ValueError(f"unknown CLASSIFICATION_PROVIDER: {name}")

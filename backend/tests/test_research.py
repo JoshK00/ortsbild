@@ -327,11 +327,11 @@ def test_an_empty_key_is_refused_and_the_provider_comes_from_the_environment(mon
     monkeypatch.delenv("RESEARCH_PROVIDER", raising=False)
     assert provider_from_env() is None
     monkeypatch.setenv("RESEARCH_PROVIDER", "anthropic")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_KEY", "test-key")
     monkeypatch.setenv("ANTHROPIC_RESEARCH_MODEL", "claude-sonnet-5-5")
     provider = provider_from_env()
     assert isinstance(provider, VerifiedProvider) and provider.provider.model == "claude-sonnet-5-5"
-    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.delenv("ANTHROPIC_KEY")
     with pytest.raises(KeyError):
         provider_from_env()
     monkeypatch.setenv("RESEARCH_PROVIDER", "unknown")
@@ -515,6 +515,6 @@ def test_the_verified_provider_checks_every_answer_and_keeps_none_as_none():
 
 def test_the_provider_from_the_environment_is_wrapped_in_the_verification(monkeypatch):
     monkeypatch.setenv("RESEARCH_PROVIDER", "anthropic")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_KEY", "test-key")
     provider = provider_from_env()
     assert isinstance(provider, VerifiedProvider) and isinstance(provider.provider, ClaudeSearchProvider) and isinstance(provider.fetcher, SafeFetcher)

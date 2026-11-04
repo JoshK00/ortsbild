@@ -44,6 +44,6 @@ def provider_from_env() -> ResearchProvider | None:
 
         # Every answer is checked against the pages it names before it is used
         return VerifiedProvider(
-            ClaudeSearchProvider(os.environ["ANTHROPIC_API_KEY"], os.getenv("ANTHROPIC_RESEARCH_MODEL", DEFAULT_MODEL)), SafeFetcher()
+            ClaudeSearchProvider(os.environ["ANTHROPIC_KEY"], os.getenv("ANTHROPIC_RESEARCH_MODEL", DEFAULT_MODEL)), SafeFetcher()
         )
     raise ValueError(f"unknown RESEARCH_PROVIDER: {name}")

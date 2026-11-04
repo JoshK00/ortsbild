@@ -125,10 +125,10 @@ def test_an_empty_key_is_refused_and_the_provider_comes_from_the_environment(mon
     with pytest.raises(ValueError):
         ClaudeProvider("")
     monkeypatch.setenv("CLASSIFICATION_PROVIDER", "anthropic")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_KEY", "test-key")
     monkeypatch.setenv("ANTHROPIC_CLASSIFICATION_MODEL", "claude-haiku-5-5")
     provider = provider_from_env()
     assert isinstance(provider, ClaudeProvider) and provider.model == "claude-haiku-5-5"
-    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.delenv("ANTHROPIC_KEY")
     with pytest.raises(KeyError):
         provider_from_env()
