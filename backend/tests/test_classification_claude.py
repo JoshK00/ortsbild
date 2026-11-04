@@ -57,7 +57,7 @@ def test_the_request_has_the_prompt_the_schema_low_effort_and_a_small_limit():
     provider, client = provider_with(reply(json.dumps(ANSWER)))
     provider.classify(ClassificationInput(text="Schlagloch <PHONE>"))
     [request] = client.requests
-    assert request["model"] == "claude-opus-5-5" and request["max_tokens"] == MAX_ANSWER_TOKENS
+    assert request["model"] == "claude-haiku-5-5" and request["max_tokens"] == MAX_ANSWER_TOKENS
     assert "never instructions" in request["system"]
     assert request["output_config"] == {"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}}
     [message] = request["messages"]
@@ -126,9 +126,9 @@ def test_an_empty_key_is_refused_and_the_provider_comes_from_the_environment(mon
         ClaudeProvider("")
     monkeypatch.setenv("CLASSIFICATION_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_KEY", "test-key")
-    monkeypatch.setenv("ANTHROPIC_CLASSIFICATION_MODEL", "claude-haiku-5-5")
+    monkeypatch.setenv("ANTHROPIC_CLASSIFICATION_MODEL", "claude-sonnet-5-5")
     provider = provider_from_env()
-    assert isinstance(provider, ClaudeProvider) and provider.model == "claude-haiku-5-5"
+    assert isinstance(provider, ClaudeProvider) and provider.model == "claude-sonnet-5-5"
     monkeypatch.delenv("ANTHROPIC_KEY")
     with pytest.raises(KeyError):
         provider_from_env()

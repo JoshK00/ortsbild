@@ -10,8 +10,9 @@ from classification.provider import ClassificationError
 
 logger = logging.getLogger("ortsbild.classification")
 
-# The model is a choice of cost against quality, it is set by ANTHROPIC_CLASSIFICATION_MODEL
-DEFAULT_MODEL = "claude-opus-5-5"
+# The model is a choice of cost against quality, it is set by ANTHROPIC_CLASSIFICATION_MODEL.
+# Haiku: about a hundredth of a cent per report and as good as the larger tiers on our evaluation set (docs/documentation.md, 2026-11-04).
+DEFAULT_MODEL = "claude-haiku-5-5"
 TIMEOUT_SECONDS = 30.0
 MAX_ANSWER_TOKENS = 1024  # the answer is a small object, the rest is room for the model to think
 

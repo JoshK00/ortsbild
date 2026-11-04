@@ -8,8 +8,9 @@ from research.prompt import INSTRUCTIONS, user_message
 
 logger = logging.getLogger("ortsbild.research")
 
-# The model is a choice of cost against quality, it is set by ANTHROPIC_RESEARCH_MODEL
-DEFAULT_MODEL = "claude-opus-5-5"
+# The model is a choice of cost against quality, it is set by ANTHROPIC_RESEARCH_MODEL.
+# Haiku found the same authority as Opus in a sixth of the time and a fraction of the cost. A harder place may need claude-sonnet-5-5.
+DEFAULT_MODEL = "claude-haiku-5-5"
 TIMEOUT_SECONDS = 120.0
 MAX_ANSWER_TOKENS = 4096
 MAX_SEARCHES = 4  # per research: every search costs money
