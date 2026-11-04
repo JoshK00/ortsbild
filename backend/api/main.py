@@ -25,6 +25,9 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     from auth.postgres_store import PostgresRefreshTokenStore
     from auth.sessions import AuthManager
     from auth.tokens import TokenIssuer
+    from classification.provider import provider_from_env
+    from classification.service import Classifier
+    from orchestrator.graph import build_report_graph
     from privacy.graph import build_privacy_graph, default_detectors
     from privacy.image_detectors import YuNetFaceDetector
     from privacy.image_text import RapidOcrEngine
@@ -41,7 +44,7 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     photo_store = s3_store_from_env()
     pseudonym_store = postgres_pseudonym_store_from_env()
 
-    graph = build_privacy_graph(
+    privacy_graph = build_privacy_graph(
         detectors,
         photo_store,
         pseudonym_store,
@@ -49,6 +52,9 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
         image_options=options,
         ocr_engine=ocr_engine,
     )
+    status_store = postgres_status_store_from_env()
+    graph = build_report_graph(privacy_graph, Classifier(provider_from_env(), photo_store), status_store)
+
     # Without AUTH_SECRET the app does not start: nobody can sign in, and there is no open fallback
     auth = AuthManager(
         AppleTokenVerifier(os.getenv("APPLE_BUNDLE_ID", DEFAULT_BUNDLE_ID)),
@@ -56,7 +62,7 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
         PostgresRefreshTokenStore(os.environ["DATABASE_URL"]),
         os.environ["PSEUDONYM_SECRET"],
     )
-    services = Services(graph, photo_store, postgres_status_store_from_env(), pseudonym_store, auth)
+    services = Services(graph, photo_store, status_store, pseudonym_store, auth)
     checks = model_checks(face_detector, detectors, ocr_engine)
     checks.update(s3_storage_checks(photo_store.client, photo_store.buckets))
     checks.update(database_checks(os.environ["DATABASE_URL"]))

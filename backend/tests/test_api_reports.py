@@ -5,6 +5,9 @@ from PIL import Image
 
 from api.main import create_app
 from api.reports import MAX_PHOTO_BYTES, Services
+from classification.provider import RuleBasedProvider
+from classification.service import Classifier
+from orchestrator.graph import build_report_graph
 from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
 from privacy.image_detectors import Box
@@ -37,14 +40,15 @@ class BrokenDetector:
 class Env:
     """The app with in-memory parts, and the parts to look into."""
 
-    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None):
+    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None):
         self.photo_store, self.status_store = InMemoryPhotoStore(), InMemoryReportStatusStore()
         self.pseudonym_store = InMemoryPseudonymStore("s")
         self.auth, self.token_store = make_auth_manager()
-        graph = build_privacy_graph(
+        privacy_graph = build_privacy_graph(
             [text_detector or PatternDetector()], self.photo_store, self.pseudonym_store,
             face_detector=face_detector or NoFace(),
         )
+        graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), self.status_store)
         services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth)
         self.client = TestClient(create_app(checks={}, services=services, api_key="k", configure_logging=False, reports_per_hour=reports_per_hour))
 
@@ -138,7 +142,7 @@ def test_text_report_is_sanitized_and_returned():
         assert response.status_code == 200 and body["status"] == "sanitized"
         assert body["report"]["text"] == "Pothole, call <PHONE>"
         assert body["report"]["pseudonym"].startswith("rep-")
-        assert env.status_store.rows[body["id"]].status == "sanitized"
+        assert env.status_store.rows[body["id"]].status == "classified"
 
 
 def test_photo_report_returns_a_clean_photo_and_deletes_the_raw_one():
@@ -349,3 +353,94 @@ def test_deleting_the_account_removes_the_raw_photo_of_a_blocked_report_too():
 def test_deleting_the_account_needs_a_login():
     with Env() as env:
         assert env.client.delete("/v1/account").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Classification in the chain
+# ---------------------------------------------------------------------------
+
+
+class BrokenProvider:
+    def classify(self, data):
+        raise RuntimeError("provider down: secret text")
+
+
+class RecordingProvider:
+    """Remembers what it was sent, so the tests can look at what leaves the server."""
+
+    def __init__(self):
+        self.seen = []
+
+    def classify(self, data):
+        self.seen.append(data)
+        return RuleBasedProvider().classify(data)
+
+
+def test_a_report_comes_back_with_its_classification():
+    with Env() as env:
+        body = env.post({"text": "Großes Schlagloch auf dem Radweg"}).json()
+    assert body["status"] == "sanitized"
+    assert body["classification"]["category"] == "pothole"
+    assert set(body["classification"]) == {"category", "lane", "emergency", "confidence"}
+    assert env.status_store.rows[body["id"]].status == "classified"
+
+
+def test_the_classification_is_stored_and_read_again_by_the_owner():
+    with Env() as env:
+        headers = env.login()
+        created = env.post({"text": "Graffiti an der Wand"}, headers=headers).json()
+        read = env.client.get(f"/v1/reports/{created['id']}", headers=headers).json()
+    assert read["classification"] == created["classification"] and read["classification"]["category"] == "graffiti"
+
+
+def test_a_failing_provider_does_not_break_the_report():
+    """The privacy result is delivered, the classification is null and the status stays sanitized."""
+    with Env(provider=BrokenProvider()) as env:
+        response = env.post({"text": "Schlagloch"})
+        body = response.json()
+    assert response.status_code == 200 and body["status"] == "sanitized"
+    assert body["classification"] is None and body["report"]["text"] == "Schlagloch"
+    assert env.status_store.rows[body["id"]].status == "sanitized"
+    assert "secret text" not in response.text
+
+
+def test_the_provider_gets_the_sanitized_text_and_nothing_about_the_person_or_the_place():
+    provider = RecordingProvider()
+    with Env(provider=provider) as env:
+        env.post({"text": "Schlagloch, ruf mich an unter 0151 2345678", "lat": "48.13", "lon": "11.57"}, user="anna")
+    [data] = provider.seen
+    assert data.text == "Schlagloch, ruf mich an unter <PHONE>"
+    everything = repr(data)
+    assert "0151" not in everything and "48.13" not in everything and "anna" not in everything
+
+
+def test_the_provider_gets_the_clean_photo_never_the_raw_one():
+    provider = RecordingProvider()
+    with Env(face_detector=OneFace(), provider=provider) as env:
+        env.post(files={"photo": ("p.jpg", make_jpeg(size=(40, 20)), "image/jpeg")})
+    [data] = provider.seen
+    with Image.open(io.BytesIO(data.photo)) as image:
+        assert sum(image.convert("RGB").getpixel((15, 10))) < 30  # the face is already covered
+
+
+def test_an_emergency_text_is_flagged():
+    with Env() as env:
+        body = env.post({"text": "Auto brennt vor dem Haus"}).json()
+    assert body["classification"]["emergency"] is True
+
+
+def test_a_blocked_or_rejected_report_is_never_classified():
+    provider = RecordingProvider()
+    with Env(text_detector=BrokenDetector(), provider=provider) as env:
+        body = env.post({"text": "secret text"}).json()
+    assert body["status"] == "blocked" and body["classification"] is None
+    assert provider.seen == []
+
+
+def test_a_retry_returns_the_classification_of_the_first_answer():
+    provider = RecordingProvider()
+    with Env(provider=provider) as env:
+        headers = env.login()
+        first = env.post({"text": "Schlagloch"}, headers=headers).json()
+        second = env.post({"text": "Schlagloch"}, headers=headers).json()
+    assert second == first and len(provider.seen) == 1  # the model is not called twice

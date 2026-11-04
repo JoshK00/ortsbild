@@ -1,4 +1,4 @@
-.PHONY: install test test-verbose test-integration graph run notices
+.PHONY: install test test-verbose test-integration graph run notices eval-classification
 
 # Create the virtual environment and install the dependencies
 install:
@@ -33,6 +33,10 @@ test-integration:
 # Start the API on this machine (http://127.0.0.1:8000, try /health). Needs backend/.env
 run:
 	PYTHONPATH=. .venv/bin/uvicorn --factory api.main:create_app --port 8000
+
+# Run the evaluation set against the classification provider and print accuracy, emergency recall and time
+eval-classification:
+	PYTHONPATH=. .venv/bin/python scripts/eval_classification.py
 
 # Write the licenses of all installed packages to THIRD_PARTY_NOTICES.md (needed before any delivery)
 notices:

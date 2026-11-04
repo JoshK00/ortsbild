@@ -18,7 +18,6 @@ from models.incoming_report import IncomingReport
 from privacy.photo_store import PhotoStore
 from privacy.pseudonyms import PseudonymStore
 from privacy.report_status import ReportRecord, ReportStatusStore
-from privacy.service import process_report
 
 logger = logging.getLogger("ortsbild.api")
 
@@ -36,7 +35,10 @@ IMAGE_FORMATS = {
 
 @dataclass
 class Services:
-    """The parts the endpoints need. Tests pass fakes, production passes the real ones."""
+    """The parts the endpoints need. Tests pass fakes, production passes the real ones.
+
+    `graph` is the orchestrator of the whole chain (privacy, classification, ...), see orchestrator/graph.py.
+    """
 
     graph: object
     photo_store: PhotoStore
@@ -72,13 +74,18 @@ def is_not_found(error: Exception) -> bool:
 def report_payload(record: ReportRecord) -> dict:
     """What the app gets for a report: sanitized (with the result), blocked, rejected or still processing.
 
-    A blocked report gets no reason (it is in the log and the status table). A rejected one gets a short code.
+    `status` is the outcome of the privacy layer. `classification` is the object of the classification, or null
+    if it does not exist (yet). A blocked report gets no reason (it is in the log and the status table).
+    A rejected one gets a short code.
     """
-    empty = {"id": record.report_id, "report": None, "photo_urls": []}
-    if record.status == "sanitized" and record.sanitized is not None:
+    empty = {"id": record.report_id, "report": None, "photo_urls": [], "classification": None}
+    if record.status in ("sanitized", "classified") and record.sanitized is not None:
         photos = record.sanitized.get("photos", [])
         urls = [f"/v1/reports/{record.report_id}/photos/{photo['id']}" for photo in photos]
-        return {"id": record.report_id, "status": "sanitized", "report": record.sanitized, "photo_urls": urls}
+        return {
+            "id": record.report_id, "status": "sanitized", "report": record.sanitized,
+            "photo_urls": urls, "classification": record.classification,
+        }
     if record.status == "blocked_privacy":
         return {**empty, "status": "blocked"}
     if record.status == "rejected":
@@ -156,9 +163,7 @@ def create_reports_router(
         except ValidationError:
             raise HTTPException(422, "the report is not valid")
 
-        result = process_report(report, services.graph, services.status_store)
-        if result.get("status") not in ("blocked_privacy", "rejected"):
-            services.status_store.save_sanitized(report_id, result["sanitized_report"].model_dump(mode="json"))
+        services.graph.invoke({"report": report})
         return JSONResponse(report_payload(own_report(report_id, user)))
 
     @router.get("/reports/{report_id}")

@@ -167,7 +167,7 @@ def test_postgres_claim_returns_the_id_that_owns_the_client_report_id():
 
 
 def test_postgres_status_store_reads_a_record_and_deletes_a_user():
-    row = ("a" * 32, "key-1", "sanitized", None, {"photos": []})
+    row = ("a" * 32, "key-1", "sanitized", None, {"photos": []}, None)
     store = PostgresReportStatusStore("dsn", fake_connect([], [[row]]))
     assert store.get("a" * 32).user_key == "key-1"
     [deleted] = PostgresReportStatusStore("dsn", fake_connect([], [[row]])).delete_user("key-1")
@@ -238,3 +238,11 @@ def test_database_health_passes_when_all_tables_exist():
     """All tables are there."""
     connect = fake_connect([], [[("pseudonyms",), ("reports",), ("refresh_tokens",)]])
     assert all(r.ok for r in run_checks(database_checks("dsn", connect)))
+
+
+def test_postgres_status_store_saves_the_classification_and_moves_the_status():
+    log = []
+    PostgresReportStatusStore("dsn", fake_connect(log, [])).save_classification("a" * 32, {"category": "pothole"})
+    sql, params = log[0]
+    assert "status = 'classified'" in sql and "classification = %s" in sql
+    assert params[1] == "a" * 32

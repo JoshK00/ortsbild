@@ -12,3 +12,4 @@ __pycache__/
 backend/logs/
 backend/THIRD_PARTY_NOTICES.md
 .env.prod
+backend/eval/photos/

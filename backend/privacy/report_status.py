@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-Status = Literal["processing", "sanitized", "blocked_privacy", "rejected"]
+Status = Literal["processing", "sanitized", "classified", "blocked_privacy", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,7 @@ class ReportRecord:
 
     `user_key` is the pseudonymous key of the owner (a keyed hash), never the Apple id.
     `sanitized` is the sanitized report as a dict, there is no raw data in a record.
+    `classification` is the result of the classification as a dict, None until it exists.
     """
 
     report_id: str
@@ -28,6 +29,7 @@ class ReportRecord:
     status: Status
     block_reason: str | None = None
     sanitized: dict | None = None
+    classification: dict | None = None
 
 
 class ReportStatusStore(Protocol):
@@ -49,6 +51,10 @@ class ReportStatusStore(Protocol):
 
     def save_sanitized(self, report_id: str, sanitized: dict) -> None: ...
 
+    def save_classification(self, report_id: str, classification: dict) -> None:
+        """Keep the classification and move the report to the status `classified`."""
+        ...
+
     def get(self, report_id: str) -> ReportRecord | None: ...
 
     def count_recent(self, user_key: str, seconds: int) -> int:
@@ -68,6 +74,7 @@ class InMemoryReportStatusStore:
         self.owners: dict[str, str] = {}  # report id -> user key
         self.client_ids: dict[tuple[str, str], str] = {}  # (user key, client report id) -> report id
         self.sanitized: dict[str, dict] = {}
+        self.classifications: dict[str, dict] = {}
         self.started_at: dict[str, float] = {}  # report id -> time.monotonic()
 
     def set_status(
@@ -91,11 +98,19 @@ class InMemoryReportStatusStore:
     def save_sanitized(self, report_id: str, sanitized: dict) -> None:
         self.sanitized[report_id] = sanitized
 
+    def save_classification(self, report_id: str, classification: dict) -> None:
+        self.classifications[report_id] = classification
+        row = self.rows[report_id]
+        self.rows[report_id] = ReportStatusRow(report_id, "classified", row.source_type, row.block_reason)
+
     def get(self, report_id: str) -> ReportRecord | None:
         row = self.rows.get(report_id)
         if row is None:
             return None
-        return ReportRecord(report_id, self.owners.get(report_id), row.status, row.block_reason, self.sanitized.get(report_id))
+        return ReportRecord(
+            report_id, self.owners.get(report_id), row.status, row.block_reason,
+            self.sanitized.get(report_id), self.classifications.get(report_id),
+        )
 
     def count_recent(self, user_key: str, seconds: int) -> int:
         now = time.monotonic()
@@ -107,6 +122,7 @@ class InMemoryReportStatusStore:
             rid = record.report_id
             self.rows.pop(rid, None)
             self.sanitized.pop(rid, None)
+            self.classifications.pop(rid, None)
             self.started_at.pop(rid, None)
             self.owners.pop(rid, None)
         self.client_ids = {k: v for k, v in self.client_ids.items() if k[0] != user_key}
