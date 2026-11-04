@@ -29,7 +29,7 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     from classification.service import Classifier
     from drafting.provider import provider_from_env as draft_provider_from_env
     from drafting.service import Drafter
-    from orchestrator.graph import build_followup_graph, build_report_graph
+    from orchestrator.graph import build_followup_graph, build_reclassify_graph, build_report_graph
     from research.postgres_registry import PostgresRegistryStore
     from research.provider import provider_from_env as research_provider_from_env
     from research.service import Researcher
@@ -62,8 +62,10 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     drafter = Drafter(draft_provider_from_env())
     # Below this confidence the user is asked what the picture shows, instead of researching on a guess
     min_confidence = float(os.getenv("CLASSIFICATION_MIN_CONFIDENCE", "0.6"))
-    graph = build_report_graph(privacy_graph, Classifier(provider_from_env(), photo_store), researcher, drafter, status_store, min_confidence)
+    classifier = Classifier(provider_from_env(), photo_store)
+    graph = build_report_graph(privacy_graph, classifier, researcher, drafter, status_store, min_confidence)
     followup_graph = build_followup_graph(researcher, drafter, status_store)
+    answer_graph = build_reclassify_graph(classifier, researcher, drafter, status_store, min_confidence)
 
     # Without AUTH_SECRET the app does not start: nobody can sign in, and there is no open fallback
     auth = AuthManager(
@@ -72,7 +74,7 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
         PostgresRefreshTokenStore(os.environ["DATABASE_URL"]),
         os.environ["PSEUDONYM_SECRET"],
     )
-    services = Services(graph, photo_store, status_store, pseudonym_store, auth, followup_graph)
+    services = Services(graph, photo_store, status_store, pseudonym_store, auth, followup_graph, answer_graph, detectors)
     checks = model_checks(face_detector, detectors, ocr_engine)
     checks.update(s3_storage_checks(photo_store.client, photo_store.buckets))
     checks.update(database_checks(os.environ["DATABASE_URL"]))

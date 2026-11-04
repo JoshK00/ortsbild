@@ -75,3 +75,14 @@ def test_start_answer_ignores_other_statuses_and_unknown_reports():
     store.set_status("r1", "sanitized", "app")
     assert store.start_answer("r1") is False and store.start_answer("nobody") is False
     assert store.rows["r1"].status == "sanitized"
+
+
+def test_a_report_takes_only_a_few_answers():
+    from privacy.report_status import MAX_ANSWERS
+
+    store = InMemoryReportStatusStore()
+    results = []
+    for _ in range(MAX_ANSWERS + 1):
+        store.set_status("r1", "needs_input", "app")
+        results.append(store.start_answer("r1"))
+    assert results == [True] * MAX_ANSWERS + [False]

@@ -10,7 +10,7 @@ from classification.provider import RuleBasedProvider
 from classification.service import Classifier
 from drafting.provider import TemplateDraftProvider
 from drafting.service import Drafter
-from orchestrator.graph import build_followup_graph, build_report_graph
+from orchestrator.graph import build_followup_graph, build_reclassify_graph, build_report_graph
 from privacy.detectors import PatternDetector
 from privacy.graph import build_privacy_graph
 from privacy.image_detectors import Box
@@ -48,6 +48,7 @@ class Env:
     def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None, draft_provider=None, min_confidence=0.6):
         self.photo_store, self.status_store = InMemoryPhotoStore(), InMemoryReportStatusStore()
         self.pseudonym_store = InMemoryPseudonymStore("s")
+        self.text_detectors = [text_detector or PatternDetector()]
         self.auth, self.token_store = make_auth_manager()
         privacy_graph = build_privacy_graph(
             [text_detector or PatternDetector()], self.photo_store, self.pseudonym_store,
@@ -58,7 +59,9 @@ class Env:
         drafter = Drafter(draft_provider or TemplateDraftProvider())
         graph = build_report_graph(privacy_graph, Classifier(provider or RuleBasedProvider(), self.photo_store), researcher, drafter, self.status_store, min_confidence)
         followup = build_followup_graph(researcher, drafter, self.status_store)
-        services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth, followup)
+        classifier = Classifier(provider or RuleBasedProvider(), self.photo_store)
+        answer_graph = build_reclassify_graph(classifier, researcher, drafter, self.status_store, min_confidence)
+        services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth, followup, answer_graph, self.text_detectors)
         self.client = TestClient(create_app(checks={}, services=services, api_key="k", configure_logging=False, reports_per_hour=reports_per_hour))
 
     def __enter__(self):
@@ -782,3 +785,164 @@ def test_the_question_survives_a_new_read_by_the_owner():
         asked = env.post({"text": "x", **PLACE}, headers=headers).json()
         read = env.client.get(f"/v1/reports/{asked['id']}", headers=headers).json()
     assert read["clarification"] == asked["clarification"] and read["clarification"]["reason"] == "unclear"
+
+
+# ---------------------------------------------------------------------------
+# The user answers the question in words: the words pass the privacy layer first
+# ---------------------------------------------------------------------------
+
+from privacy.report_status import MAX_ANSWERS  # noqa: E402
+
+
+class TextAware:
+    """Doubts without a word it knows, and is sure with one: like a model that reads the description."""
+
+    def __init__(self):
+        self.seen = []
+
+    def classify(self, data):
+        self.seen.append(data)
+        if "schlagloch" in (data.text or "").lower():
+            return Classification(category="pothole", lane="hazard", emergency=False, confidence=0.9)
+        return Classification(category="other", lane="nuisance", emergency=False, confidence=0.2)
+
+
+class Switchable:
+    """The pattern detector that can be switched to fail, to see what happens if the words cannot be checked."""
+
+    def __init__(self):
+        self.inner, self.broken = PatternDetector(), False
+
+    def detect(self, text):
+        if self.broken:
+            raise RuntimeError("detector down: secret words")
+        return self.inner.detect(text)
+
+
+def asking(**kwargs):
+    """An environment whose first classification doubts (a text without a known word), with recording providers."""
+    classifier, research, draft = TextAware(), ScriptedResearchProvider(FOUND), RecordingDraftProvider()
+    return Env(provider=classifier, research_provider=research, draft_provider=draft, **kwargs), classifier, research, draft
+
+
+def answer(env, report_id, headers, **body):
+    return env.client.post(f"/v1/reports/{report_id}/answer", json=body, headers=headers)
+
+
+def test_the_words_of_the_user_classify_the_report_and_it_goes_on_to_research_and_draft():
+    env, classifier, research, draft = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        assert asked["clarification"] is not None
+        response = answer(env, asked["id"], headers, text="Es ist ein großes Schlagloch")
+    body = response.json()
+    assert response.status_code == 200 and body["clarification"] is None
+    assert body["classification"]["category"] == "pothole" and body["classification"]["confidence"] == 0.9
+    assert body["research"]["authority"] == "Baureferat Tiefbau" and body["draft"]["authority"] == "Baureferat Tiefbau"
+    assert research.queries[0].category == "pothole" and draft.seen[0].category == "pothole"
+    assert env.status_store.rows[asked["id"]].status == "drafted"
+
+
+def test_the_words_are_added_to_the_sanitized_report_and_the_model_reads_them_with_the_first_text():
+    env, classifier, _, _ = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        body = answer(env, asked["id"], headers, text="Ein Schlagloch").json()
+    assert body["report"]["text"] == "Etwas liegt dort\nEin Schlagloch"
+    assert classifier.seen[-1].text == "Etwas liegt dort\nEin Schlagloch"
+
+
+def test_the_raw_words_never_reach_a_model_the_store_or_the_answer():
+    """A phone number in the answer is a placeholder from the moment the answer is read."""
+    env, classifier, research, draft = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        response = answer(env, asked["id"], headers, text="Schlagloch, ruf mich an unter 0151 2345678")
+    body = response.json()
+    assert "0151" not in response.text and "<PHONE>" in body["report"]["text"]
+    everywhere = repr([classifier.seen, research.queries, draft.seen, env.status_store.sanitized, env.status_store.classifications, env.status_store.drafts])
+    assert "0151" not in everywhere and "2345678" not in everywhere
+
+
+def test_what_the_words_removed_is_counted_in_the_redaction_log():
+    env, _, _, _ = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        body = answer(env, asked["id"], headers, text="Schlagloch, Telefon 0151 2345678").json()
+    kinds = [(entry["step"], entry["kind"]) for entry in body["report"]["redaction_log"]["entries"]]
+    assert ("sanitize_text", "phone") in kinds
+
+
+def test_words_that_cannot_be_checked_are_dropped_and_the_question_stays_open():
+    detector = Switchable()
+    classifier, research, draft = TextAware(), ScriptedResearchProvider(FOUND), RecordingDraftProvider()
+    with Env(text_detector=detector, provider=classifier, research_provider=research, draft_provider=draft) as env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        seen_before = len(classifier.seen)
+        detector.broken = True
+        response = answer(env, asked["id"], headers, text="Schlagloch 0151 2345678")
+        detector.broken = False
+        retry = answer(env, asked["id"], headers, text="Schlagloch")
+    assert response.status_code == 503 and "secret" not in response.text and "0151" not in response.text
+    assert len(classifier.seen) == seen_before + 1  # only the retry reached the model
+    assert retry.status_code == 200 and retry.json()["classification"]["category"] == "pothole"
+    assert "0151" not in repr([env.status_store.sanitized, classifier.seen])
+
+
+def test_words_that_are_still_unclear_ask_again_until_the_limit():
+    env, _, research, _ = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        codes = []
+        for number in range(MAX_ANSWERS + 1):
+            response = answer(env, asked["id"], headers, text=f"Es ist komisch {number}")
+            codes.append(response.status_code)
+            if response.status_code == 200:
+                assert response.json()["clarification"] is not None  # asked again
+    assert codes == [200] * MAX_ANSWERS + [409] and research.queries == []
+
+
+def test_a_category_counts_as_an_answer_too():
+    env, _, _, _ = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        for _ in range(MAX_ANSWERS):
+            answer(env, asked["id"], headers, text="komisch")
+        assert answer(env, asked["id"], headers, category="tree").status_code == 409
+
+
+def test_an_emergency_in_the_words_stops_the_chain():
+    env, _, research, draft = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        body = answer(env, asked["id"], headers, text="Schlagloch und es brennt, Feuer!").json()
+    assert body["classification"]["emergency"] is True and body["research"] is None and body["draft"] is None
+    assert research.queries == [] and draft.seen == []
+
+
+@pytest.mark.parametrize("body", [{"text": "x", "category": "tree"}, {}, {"text": ""}, {"text": "   "}, {"text": "x" * 501}, {"text": None, "category": None}])
+def test_an_answer_is_exactly_a_category_or_a_short_text(body):
+    env, _, _, _ = asking()
+    with env:
+        headers = env.login()
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=headers).json()
+        response = answer(env, asked["id"], headers, **body)
+    assert response.status_code == 422 and env.status_store.rows[asked["id"]].status == "needs_input"
+
+
+def test_the_words_of_another_user_are_not_accepted_and_nothing_is_stored():
+    env, classifier, _, _ = asking()
+    with env:
+        asked = env.post({"text": "Etwas liegt dort", **PLACE}, headers=env.login("anna")).json()
+        before = len(classifier.seen)
+        foreign = answer(env, asked["id"], env.login("ben"), text="Schlagloch 0151 2345678")
+    assert foreign.status_code == 404 and len(classifier.seen) == before
+    assert "0151" not in repr(env.status_store.sanitized)

@@ -128,9 +128,15 @@ def build_report_graph(
     """
     graph = StateGraph(ReportState)
     graph.add_node("privacy", make_privacy_node(privacy_graph, status_store))
-    graph.add_node("classify", make_classify_node(classifier, status_store))
     graph.add_edge(START, "privacy")
     graph.add_conditional_edges("privacy", after_privacy, {"classify": "classify", END: END})
+    add_stages_after_privacy(graph, classifier, researcher, drafter, status_store, min_confidence)
+    return graph.compile()
+
+
+def add_stages_after_privacy(graph, classifier, researcher, drafter, status_store, min_confidence: float) -> None:
+    """The stages from the classification on: classify, then ask, research or stop, then draft."""
+    graph.add_node("classify", make_classify_node(classifier, status_store))
     graph.add_node("research", make_research_node(researcher, status_store))
     graph.add_node("ask", make_ask_node(status_store))
     graph.add_conditional_edges("classify", make_after_classify(min_confidence), {"research": "research", "ask": "ask", END: END})
@@ -138,6 +144,16 @@ def build_report_graph(
     graph.add_node("draft", make_draft_node(drafter, status_store))
     graph.add_edge("research", "draft")
     graph.add_edge("draft", END)
+
+
+def build_reclassify_graph(
+    classifier: Classifier, researcher: Researcher, drafter: Drafter, status_store: ReportStatusStore, min_confidence: float = 0.6
+):
+    """The chain from the classification on, for a report whose user described the problem in words. It starts with the
+    sanitized report (the description is already sanitized and part of it) and can ask again if the picture is still unclear."""
+    graph = StateGraph(ReportState)
+    graph.add_edge(START, "classify")
+    add_stages_after_privacy(graph, classifier, researcher, drafter, status_store, min_confidence)
     return graph.compile()
 
 

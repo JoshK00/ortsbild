@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
@@ -19,15 +19,18 @@ from auth.sessions import AuthManager
 from auth.tokens import AccessClaims
 from classification.models import CLARIFICATION_CATEGORIES, Classification
 from models.incoming_report import IncomingReport
-from models.sanitized_report import SanitizedReport
+from models.sanitized_report import RedactionLog, SanitizedReport
 from privacy.photo_store import PhotoStore
 from privacy.pseudonyms import PseudonymStore
+from privacy.detectors import TextDetector
 from privacy.report_status import ReportRecord, ReportStatusStore
+from privacy.text import sanitize_text
 
 logger = logging.getLogger("ortsbild.api")
 
 MAX_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
+MAX_ANSWER_CHARS = 500  # the description of the problem that the user types after the question
 RATE_WINDOW_SECONDS = 3600
 
 # what the file really is (detected from its content) -> (mime type, file extension)
@@ -43,7 +46,9 @@ class Services:
     """The parts the endpoints need. Tests pass fakes, production passes the real ones.
 
     `graph` is the orchestrator of the whole chain (privacy, classification, ...), see orchestrator/graph.py.
-    `followup_graph` runs the rest of it (research, draft) after the user answered a question.
+    `followup_graph` runs the rest of it (research, draft) after the user picked a category. `answer_graph` runs the
+    classification again, then the rest, after the user described the problem in words. `text_detectors` are the ones of
+    the privacy layer, the description passes them before anything else happens to it.
     """
 
     graph: object
@@ -52,6 +57,8 @@ class Services:
     pseudonym_store: PseudonymStore
     auth: AuthManager
     followup_graph: object | None = None
+    answer_graph: object | None = None
+    text_detectors: list[TextDetector] | None = None
 
 
 def detect_image(data: bytes) -> tuple[str, str]:
@@ -113,11 +120,23 @@ def clarification_of(record: ReportRecord) -> dict | None:
 
 
 class AnswerBody(BaseModel):
-    """The answer to the question what the picture shows: one of the categories, nothing else."""
+    """The answer to the question what the picture shows: one of the categories, or the problem in the user's own words.
+
+    Exactly one of them. The words can hold personal data, so they are sanitized first (see `answer_question`).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    category: Literal[CLARIFICATION_CATEGORIES]  # type: ignore[valid-type]
+    category: Literal[CLARIFICATION_CATEGORIES] | None = None  # type: ignore[valid-type]
+    text: str | None = Field(default=None, min_length=1, max_length=MAX_ANSWER_CHARS)
+
+    @model_validator(mode="after")
+    def exactly_one(self) -> "AnswerBody":
+        if (self.category is None) == (self.text is None):
+            raise ValueError("send a category or a text, not both and not none")
+        if self.text is not None and not self.text.strip():
+            raise ValueError("the text is empty")
+        return self
 
 
 def create_reports_router(
@@ -215,22 +234,44 @@ def create_reports_router(
     def answer_question(
         body: AnswerBody, report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)
     ) -> JSONResponse:
-        """The user says what the picture shows, after the question "what is this about?". The research and the draft follow.
+        """The user says what the problem is, after the question "what is this about?".
 
-        The chosen category is the user's word, so it counts as sure (confidence 1). The lane and the emergency flag stay
-        what the model found. This works once: a second answer, or an answer to a report without a question, gets 409.
+        - A category: it is the user's word and counts as sure (confidence 1), the lane and the emergency flag stay what
+          the model found. The research and the draft follow.
+        - Words: they are sanitized with the detectors of the privacy layer **first**, the raw words are never stored, logged
+          or sent on. If they cannot be checked they are dropped (503) and the question stays open. Then the classification
+          runs again with the description, and the question can come again if the picture is still unclear.
+
+        A report takes `MAX_ANSWERS` answers. An answer to a report without an open question, a second one at the same
+        moment, or one beyond the limit gets 409.
         """
         services = get_services()
         record = own_report(report_id, user)
         if record.status != "needs_input" or record.sanitized is None or record.classification is None:
-            raise HTTPException(409, "no question is open for this report")
-        if not services.status_store.start_answer(report_id):
-            raise HTTPException(409, "no question is open for this report")  # another answer was faster
+            raise HTTPException(409, "no question can be answered for this report")
         sanitized = SanitizedReport.model_validate_json(json.dumps(record.sanitized))
-        asked = Classification.model_validate_json(json.dumps(record.classification))
-        chosen = Classification(category=body.category, lane=asked.lane, emergency=asked.emergency, confidence=1.0)
-        services.status_store.save_classification(report_id, chosen.model_dump(mode="json"))
-        services.followup_graph.invoke({"sanitized_report": sanitized, "classification": chosen})
+
+        if body.text is not None:
+            try:
+                clean, entries = sanitize_text(body.text.strip(), services.text_detectors or [])
+            except Exception as error:  # fail closed: words that cannot be checked are not used
+                logger.error("answer text blocked: report_id=%s error=%s", report_id, type(error).__name__)
+                raise HTTPException(503, "the answer could not be checked, try again later") from None
+            if not services.status_store.start_answer(report_id):
+                raise HTTPException(409, "no question can be answered for this report")
+            described = sanitized.model_copy(update={
+                "text": f"{sanitized.text}\n{clean}" if sanitized.text else clean,
+                "redaction_log": RedactionLog(entries=[*sanitized.redaction_log.entries, *entries]),
+            })
+            services.status_store.save_sanitized(report_id, described.model_dump(mode="json"))
+            services.answer_graph.invoke({"sanitized_report": described})
+        else:
+            if not services.status_store.start_answer(report_id):
+                raise HTTPException(409, "no question can be answered for this report")
+            asked = Classification.model_validate_json(json.dumps(record.classification))
+            chosen = Classification(category=body.category, lane=asked.lane, emergency=asked.emergency, confidence=1.0)
+            services.status_store.save_classification(report_id, chosen.model_dump(mode="json"))
+            services.followup_graph.invoke({"sanitized_report": sanitized, "classification": chosen})
         return JSONResponse(report_payload(own_report(report_id, user)))
 
     @router.get("/reports/{report_id}/photos/{photo_id}")

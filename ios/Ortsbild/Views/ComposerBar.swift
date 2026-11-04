@@ -11,6 +11,8 @@ struct ComposerBar: View {
     @Binding var text: String
     @Binding var photo: UIImage?
     let canSend: Bool
+    /// The hint in the empty input field, "Nachricht" unless a question waits for the answer.
+    var placeholder: LocalizedStringKey = "Nachricht"
     let onSend: () -> Void
 
     @State private var showCamera = false
@@ -26,7 +28,7 @@ struct ComposerBar: View {
             HStack(alignment: .bottom, spacing: 8) {
                 attachMenu
 
-                TextField("Nachricht", text: $text, axis: .vertical)
+                TextField(placeholder, text: $text, axis: .vertical)
                     .lineLimit(1...4)
                     .padding(.vertical, 8)
 

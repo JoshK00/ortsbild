@@ -11,6 +11,9 @@ protocol ReportService {
     func respond(photo: UIImage?, text: String?) -> AsyncStream<ChatContent>
     /// The user's answer to a follow-up question (level 2). `reportID` says which report was asked about, `nil` for the scripted mock.
     func answer(_ option: String, reportID: String?) -> AsyncStream<ChatContent>
+    /// The user describes the problem in their own words, as the answer to the open question of a report.
+    /// The server sanitizes the words first, like every text, then it classifies the report again.
+    func describe(_ text: String, reportID: String) -> AsyncStream<ChatContent>
     /// Action on a draft.
     func perform(_ action: DraftAction) -> AsyncStream<ChatContent>
 }

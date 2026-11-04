@@ -34,6 +34,10 @@ struct MockReportService: ReportService {
         ])
     }
 
+    func describe(_ text: String, reportID: String) -> AsyncStream<ChatContent> {
+        stream([(.text("Danke, das ist der Prototyp ohne Server."), 0.4)])
+    }
+
     func perform(_ action: DraftAction) -> AsyncStream<ChatContent> {
         // TODO: Draft versions and responsible authority will later come from the backend
         switch action {

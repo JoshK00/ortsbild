@@ -5,7 +5,7 @@ import psycopg
 from privacy.pseudonyms import hash_identifier, new_pseudonym
 from psycopg.types.json import Jsonb
 
-from privacy.report_status import ReportRecord, ReportStatusRow, Status
+from privacy.report_status import MAX_ANSWERS, ReportRecord, ReportStatusRow, Status
 from privacy.retry import retry
 
 
@@ -116,9 +116,9 @@ class PostgresReportStatusStore:
             with self.connect(self.dsn) as connection:
                 # One statement: of two answers at the same moment only one finds the status `needs_input`
                 return connection.execute(
-                    "update reports set status = 'classified', updated_at = now() "
-                    "where id = %s and status = 'needs_input' returning id",
-                    (report_id,),
+                    "update reports set status = 'classified', answer_count = answer_count + 1, updated_at = now() "
+                    "where id = %s and status = 'needs_input' and answer_count < %s returning id",
+                    (report_id, MAX_ANSWERS),
                 ).fetchone()
 
         return retry(run, "answer start") is not None

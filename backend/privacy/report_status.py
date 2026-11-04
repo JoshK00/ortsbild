@@ -2,6 +2,9 @@ import time
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+# How many answers a report takes: the user can describe the problem, add a word, pick a category
+MAX_ANSWERS = 3
+
 Status = Literal["processing", "sanitized", "classified", "needs_input", "researched", "drafted", "blocked_privacy", "rejected"]
 
 
@@ -56,8 +59,8 @@ class ReportStatusStore(Protocol):
     def start_answer(self, report_id: str) -> bool:
         """The user answers the open question: move the report from `needs_input` back to `classified`.
 
-        True if it was waiting for an answer. False if not, or if another answer came first, so the research
-        and the draft are started only once (the check and the change are one step).
+        True if it was waiting for an answer and has not used up its answers (`MAX_ANSWERS`). False if not, or if another
+        answer came first, so the research and the draft are started only once (the check and the change are one step).
         """
         ...
 
@@ -95,6 +98,7 @@ class InMemoryReportStatusStore:
         self.classifications: dict[str, dict] = {}
         self.research: dict[str, dict] = {}
         self.drafts: dict[str, dict] = {}
+        self.answers: dict[str, int] = {}  # how often the user answered the question of a report
         self.started_at: dict[str, float] = {}  # report id -> time.monotonic()
 
     def set_status(
@@ -120,8 +124,9 @@ class InMemoryReportStatusStore:
 
     def start_answer(self, report_id: str) -> bool:
         row = self.rows.get(report_id)
-        if row is None or row.status != "needs_input":
+        if row is None or row.status != "needs_input" or self.answers.get(report_id, 0) >= MAX_ANSWERS:
             return False
+        self.answers[report_id] = self.answers.get(report_id, 0) + 1
         self.rows[report_id] = ReportStatusRow(report_id, "classified", row.source_type, row.block_reason)
         return True
 

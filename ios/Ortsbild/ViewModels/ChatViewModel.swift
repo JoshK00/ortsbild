@@ -43,11 +43,27 @@ final class ChatViewModel {
         return (hasText || attachedPhoto != nil) && !isProcessing
     }
 
+    /// The report that the app asked a question about, if the last message is that question.
+    private var openQuestionReportID: String? {
+        if case .clarification(let id, _, _)? = messages.last?.content { id } else { nil }
+    }
+
+    /// True while a question waits for the answer: then the input field is the answer.
+    var isAnswering: Bool { openQuestionReportID != nil }
+
     func send() {
         guard canSend else { return }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let caption = text.isEmpty ? nil : text
         let photo = attachedPhoto
+
+        // The words are the answer to the open question, they do not start a new report. A new photo does.
+        if photo == nil, let caption, let reportID = openQuestionReportID {
+            append(.user, .text(caption))
+            inputText = ""
+            run(service.describe(caption, reportID: reportID))
+            return
+        }
 
         if let photo {
             append(.user, .photo(photo, caption: caption))

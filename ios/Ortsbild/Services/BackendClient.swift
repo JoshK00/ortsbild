@@ -93,7 +93,16 @@ actor BackendClient {
 
     /// The user's answer to the question what the picture shows. The server then researches the authority and writes the draft.
     func answer(reportID: String, category: String) async throws -> ReportResponse {
-        let body = try JSONEncoder().encode(["category": category])
+        try await postAnswer(reportID: reportID, fields: ["category": category])
+    }
+
+    /// The user's answer in their own words. The server sanitizes it before it does anything else with it.
+    func answer(reportID: String, text: String) async throws -> ReportResponse {
+        try await postAnswer(reportID: reportID, fields: ["text": text])
+    }
+
+    private func postAnswer(reportID: String, fields: [String: String]) async throws -> ReportResponse {
+        let body = try JSONEncoder().encode(fields)
         let (data, response) = try await authorized(path: "/v1/reports/\(reportID)/answer", method: "POST", body: body, contentType: "application/json")
         guard response.statusCode == 200 else { throw BackendError.server(status: response.statusCode) }
         return try JSONDecoder().decode(ReportResponse.self, from: data)

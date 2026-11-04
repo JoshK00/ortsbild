@@ -15,8 +15,18 @@ struct ClarificationTests {
     /// Records what the chat asks the service, answers nothing.
     final class RecordingService: ReportService {
         var answers: [(option: String, reportID: String?)] = []
+        var descriptions: [(text: String, reportID: String)] = []
+        var responses: [(hasPhoto: Bool, text: String?)] = []
 
-        func respond(photo: UIImage?, text: String?) -> AsyncStream<ChatContent> { AsyncStream { $0.finish() } }
+        func respond(photo: UIImage?, text: String?) -> AsyncStream<ChatContent> {
+            responses.append((photo != nil, text))
+            return AsyncStream { $0.finish() }
+        }
+
+        func describe(_ text: String, reportID: String) -> AsyncStream<ChatContent> {
+            descriptions.append((text, reportID))
+            return AsyncStream { $0.finish() }
+        }
 
         func answer(_ option: String, reportID: String?) -> AsyncStream<ChatContent> {
             answers.append((option, reportID))
@@ -85,6 +95,62 @@ struct ClarificationTests {
         // The answer of the user is part of the chat
         guard case .text(let shown)? = model.messages.last?.content else { Issue.record("answer not shown"); return }
         #expect(shown == "Graffiti")
+    }
+
+    /// A chat with a question that is open, as it is after the app asked what the picture shows.
+    private func openQuestion(reportID: String = "r-42") -> (ChatViewModel, RecordingService) {
+        let store = makeStore()
+        let id = UUID()
+        store.save([
+            ChatMessage(sender: .user, content: .text("Etwas liegt dort")),
+            ChatMessage(sender: .agent, content: .clarification(reportID: reportID, text: "Was ist das Problem?", options: ["Müll"])),
+        ], for: id)
+        let service = RecordingService()
+        return (ChatViewModel(ticketID: id, store: store, service: service), service)
+    }
+
+    @Test func wordsTypedWhileAQuestionIsOpenAreTheAnswerAndNotANewReport() {
+        let (model, service) = openQuestion()
+        #expect(model.isAnswering)
+        model.inputText = "  Das Schlagloch vor der Schule  "
+        model.send()
+
+        #expect(service.descriptions.count == 1 && service.descriptions[0].text == "Das Schlagloch vor der Schule" && service.descriptions[0].reportID == "r-42")
+        #expect(service.responses.isEmpty)
+        guard case .text(let shown)? = model.messages.last?.content else { Issue.record("answer not shown"); return }
+        #expect(shown == "Das Schlagloch vor der Schule")
+        #expect(model.inputText.isEmpty)
+    }
+
+    @Test func aNewPhotoWhileAQuestionIsOpenStartsANewReport() {
+        let (model, service) = openQuestion()
+        model.attachedPhoto = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).image { _ in }
+        model.inputText = "Ein besseres Foto"
+        model.send()
+        #expect(service.responses.count == 1 && service.responses[0].hasPhoto && service.descriptions.isEmpty)
+    }
+
+    @Test func wordsWithoutAnOpenQuestionStartANewReport() {
+        let store = makeStore()
+        let service = RecordingService()
+        let model = ChatViewModel(ticketID: UUID(), store: store, service: service)
+        #expect(!model.isAnswering)
+        model.inputText = "Großes Schlagloch"
+        model.send()
+        #expect(service.responses.count == 1 && service.descriptions.isEmpty)
+    }
+
+    @Test func emptyWordsAreNotSentAsAnAnswer() {
+        let (model, service) = openQuestion()
+        model.inputText = "   "
+        model.send()
+        #expect(service.descriptions.isEmpty && service.responses.isEmpty && !model.canSend)
+    }
+
+    @Test func theQuestionIsNoLongerOpenOnceAnythingFollowsIt() {
+        let (model, _) = openQuestion()
+        model.choose(option: "Müll")
+        #expect(!model.isAnswering)  // the answer of the user is now the last message
     }
 
     @Test func aScriptedQuestionHasNoReport() {

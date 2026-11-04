@@ -53,6 +53,7 @@ struct ChatView: View {
                     text: $viewModel.inputText,
                     photo: $viewModel.attachedPhoto,
                     canSend: viewModel.canSend,
+                    placeholder: viewModel.isAnswering ? "Beschreibe das Problem" : "Nachricht",
                     onSend: handleSend
                 )
             }
