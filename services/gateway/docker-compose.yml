@@ -1,0 +1,27 @@
+# Local stack: API + email worker sharing one SQLite file and one storage folder.
+# For Supabase, set GATEWAY_DATABASE_URL and GATEWAY_STORAGE_BACKEND=s3 in .env instead.
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      GATEWAY_DATABASE_URL: sqlite:////app/data/gateway.db
+      GATEWAY_STORAGE_LOCAL_ROOT: /app/data/storage
+    ports:
+      - "8000:8000"
+    volumes:
+      - gateway-data:/app/data
+
+  imap-worker:
+    build: .
+    command: ["python", "-m", "gateway.workers.imap_poller"]
+    env_file: .env
+    environment:
+      GATEWAY_DATABASE_URL: sqlite:////app/data/gateway.db
+      GATEWAY_STORAGE_LOCAL_ROOT: /app/data/storage
+    volumes:
+      - gateway-data:/app/data
+    profiles: ["email"]  # start with: docker compose --profile email up
+
+volumes:
+  gateway-data:
