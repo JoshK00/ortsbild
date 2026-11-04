@@ -1,124 +1,147 @@
 # Plan: research of the responsible authority (agent 2)
 
-Status: 2026-11-04. Detail plan for the research part of item 5.4 of [plan.md](plan.md). Effort: S = under an hour, M = a few hours, L = a day or more.
+Status: 2026-11-04, revised the same day. Detail plan for the research part of item 5.4 of [plan.md](plan.md). Effort: S = under an hour, M = a few hours, L = a day or more.
 Owner: **You** = needs your decision or your accounts, **Claude** = can be built here, **Team** = needs the team or an expert.
 
-## Goal
+## What changed
 
-Take a classified report (category, lane) and its location and answer: **which authority is responsible, and how do we reach it?**
-The answer is a `ResearchResult` (authority, channel, sources, confidence). It feeds the policy code, the drafting agent and the approval pause.
-A wrong authority is the worst failure here: a report that goes to the wrong office is lost, and the user trusts us less. So the system prefers "I do not know" to a guess.
+The first version of this plan started from a pilot municipality with a hand-filled registry. That does not fit the test group: the students come from many different places and countries, so **no fixed pilot place can serve them**. The research has to work for **any place**. The agent that looks things up on the web is therefore the core, and the registry becomes a memory of what was confirmed, not a hand-filled start.
 
-What is **not** part of this plan: duplicate check, drafting, approval, the real sending (plan.md 5.5 to 5.7).
+## Goal (the MVP)
+
+From a classified report, produce **the final message for the user to approve**: a neutral text, the cleaned photo, the address of the place, and **the authority with a way to contact it**. The research finds the authority, the drafting step (the "main" model) puts everything into the message in the chat (this plan covers the research, the drafting is the next part of plan.md 5.4).
+
+The research is allowed to be wrong, but never silently wrong: the user always sees **who** and **where the information comes from** (links), and the approval is the check. If nothing is found, the user gets the draft anyway and adds the recipient by hand.
+
+What is **not** part of this plan: duplicate check, the drafting itself, the approval pause, the real sending (plan.md 5.5 to 5.7).
 
 ## The design
 
-**Registry first, the agent second.** Most reports in a pilot area have a known answer. A table we filled and checked ourselves answers them without any model and without sending data to anybody. The agent only works where the registry has no entry, and what it finds is a *suggestion* that a person checks before it becomes a registry entry.
-
 ```
-classified report
+classified report + place (country, town, street ... from the phone)
       │
       ▼
-1. municipality from the coordinates   (offline, no third party gets the location)
+1. registry: has someone confirmed this place and category before?
+      ├── yes ─► ResearchResult from memory, no model call
       │
-      ▼
-2. registry lookup (municipality, category)
-      ├── hit ─────────────► ResearchResult, verified, confidence 1.0, no model call
-      │
-      └── miss ─► 3. research agent (tools, sources) ─► ResearchResult, unverified, with sources
-                                                      └► suggestion for the registry (a person checks it)
+      └── no ─► 2. research agent: search the web, read pages, answer with sources
+                       │
+                       ▼
+                 ResearchResult (authority, channel, language, sources, confidence)
+                       │
+                       ▼
+                 shown to the user: [confirm]  [wrong authority]  [enter contact by hand]
+                       └─ confirmed ─► written to the registry (the memory grows with use)
 ```
 
-### 1. Municipality from the coordinates
-Offline: a point-in-polygon check on boundary data with the official municipality key (AGS). No geocoder gets the location of the report (documentation.md, 2026-10-27: nothing may link location and user).
-For the MVP the boundaries of the pilot municipalities are enough, checked with a small geometry library in Python. PostGIS comes with the duplicate check (plan.md 5.5) and can take over then.
-TODO to settle: the license and the source of the boundary data (the federal agency data or OpenStreetMap, both need an attribution).
+### 1. The place comes from the phone
+The app already has the position. The phone turns it into an address with Apple's geocoder (works worldwide): country, state, town or municipality, district, postal code, street, house number. The app sends these as **structured fields** next to the coordinates and shows one line ("Hauptstraße 12, 80331 München, Deutschland") that the user can correct.
+- No geocoder on our server, so no third party gets the location from us. The phone talks to Apple, as it does for every maps app.
+- The same address goes into the final message, so this also answers "where is the defect" for the authority.
+- The fields are **untrusted input** (the user can edit them): limited in length, never put into an instruction, only used as search words.
+- TODO: if the geocoder fails (no network), the app asks the user to type the place.
 
-### 2. The registry
-- Files in the repository, one per municipality (`backend/registry/<ags>.yaml`): the authority, the department, the categories it handles, the channel (`email`, `web_form` or `open311`), the target (address or URL), the source URL where the contact was read, and the date of the last check. Contact data of authorities is public.
-- Why files and not only the database: the team can read, review and correct them in a pull request, and the history shows who changed what. A loader puts them into a table.
-- An entry is `verified` only when a person has checked the source and the channel.
+### 2. The registry is a memory, not a start
+A table keyed by (country, municipality, category): authority, channel (`email`, `web_form`, `open311`), target, the sources, how many users confirmed it, whether the team verified it, and when. It is used first, so a place that someone confirmed once costs no model call and gives the same answer again. Old entries expire (a contact changes).
+An entry written by users counts as *confirmed by users*, an entry the team checked as *verified*. Real sending (later) needs `verified`.
 
-### 3. The research agent (fallback)
-A LangGraph agent with a few tools, behind the same kind of provider interface as the classification:
+### 3. The research agent
+A LangGraph agent behind the same kind of provider interface as the classification. Tools:
 
 | Tool | What it does | Limit |
 |---|---|---|
-| `find_municipality` | name and key of the municipality | local, no network |
-| `registry_lookup` | what the registry knows | local |
-| `fetch_page` | reads one web page | only the domain of the municipality and a short allowlist, size and time limit, `robots.txt` respected |
-| `search_web` | open web search | **not in the MVP** (needs a search provider and its own privacy check) |
+| `registry_lookup` | what the memory knows | local |
+| `search_web` | web search, in the language of the place | a provider behind an interface, a few searches per run |
+| `fetch_page` | reads one page and returns its text | the safe fetcher below |
 
-- The agent gets **only the municipality (name, key) and the category.** No text, no photo, no pseudonym, no coordinates.
-- A web page is untrusted input (prompt injection): the agent has no tool that writes, sends or changes anything, and its answer is checked against a schema.
-- **Every claim needs a source.** An authority or a contact that no fetched page supports is dropped. A made-up email address is worse than none.
-- The result is stored as a **suggestion** (`authority_suggestions`) for a person to verify and move into the registry. That is how the registry grows.
+- The agent gets **only the place (country, town, district) and the category.** Not the text, not the photo, not the pseudonym, not the coordinates, not the street number.
+- **Every claim needs a source** (a URL it read). A name or an address that no page supports is dropped. A made-up email address is worse than none.
+- It has no tool that sends, writes or changes anything outside its own result. A page that says "ignore your rules" can only change the answer inside the schema, and the user sees the sources.
+- The language of the answer: the official language of the place. The result carries `language`, so the draft can be written in it.
+
+### The safe page fetcher
+Search results lead to pages we do not know. The fetcher is code, not a model, and enforces: only `https`, no private or local addresses (also not after a redirect), no more than a few pages and a few seconds per run, a size limit, only text is extracted, `robots.txt` respected, results cached.
 
 ### The result
 
 ```python
+class Place(ContractModel):          # what the phone sends, all optional text fields with length limits
+    country_code: str | None
+    state: str | None
+    municipality: str | None         # town or municipality
+    district: str | None
+    postal_code: str | None
+    street: str | None
+    house_number: str | None
+
 class Channel(ContractModel):
     type: Literal["email", "web_form", "open311"]
-    target: str          # address or URL
-    verified: bool       # a person checked it
+    target: str                      # address or URL
+    verified: bool                   # the team checked it
 
-class ResearchResult(ContractModel):          # strict, extra="forbid", frozen
-    municipality: str    # name, for the app
+class ResearchResult(ContractModel): # strict, extra="forbid", frozen
     authority: str | None
     channel: Channel | None
-    sources: list[str]   # URLs that support the answer, empty only for a registry hit
-    confidence: float    # 0 to 1
+    language: str | None             # of the place, for the draft
+    sources: list[str]               # URLs that support the answer, empty only for a registry hit
+    confidence: float                # 0 to 1
 ```
 
 ### Where it sits in the chain
-A node `research` behind `classify` in `orchestrator/graph.py`. Emergencies and reports without a classification do not reach it. Statuses: `classified` becomes `researched`. If the research fails, the report stays `classified` and is researched later. "Wrong authority" in the app runs the node again and the earlier answer is excluded.
+A node `research` behind `classify` in `orchestrator/graph.py`. Emergencies and reports without a classification do not reach it. Statuses: `classified` becomes `researched`. If the research fails or finds nothing, the report stays `classified` and the user adds the recipient by hand. "Wrong authority" in the app runs the node again with the earlier answer excluded.
 
-### Policy
-An unverified channel is **never used for real sending**. The policy code (plan.md 5.4) reads `verified` and `confidence` to choose the approval level. In the prototype the sending is simulated anyway (plan.md 5.7).
+## Privacy
+
+- **Nothing about the person** goes to the search or the model: only place and category.
+- The search queries contain a town and a word like "Ordnungsamt" or "Mängelmelder". The search provider sees which town is searched, not who searches (the request comes from our server).
+- The coordinates stay on the phone and in our database. The exact street number is not needed for the research.
+- The research stays on the sanitized side of the chain: it never sees a raw report.
 
 ## Decisions needed first
 
 | # | Decision | My recommendation |
 |---|---|---|
-| P1 | **Pilot municipality (one or two).** Where do the test users report? The research needs real contacts for it. | One municipality where the team lives or studies, a second one later to prove that it is not hard-coded. **Please name it.** |
-| P2 | Municipality from the coordinates: offline boundaries or a geocoder (Nominatim)? | Offline boundaries of the pilot area. A geocoder would send the exact location to a third party. |
-| P3 | Registry: files in the repository or only the database? | Files in the repository, loaded into a table. Reviewable and versioned. |
-| P4 | Open web search in the MVP? | No. Registry plus fetching the pages of the municipality only. Open search later, with its own privacy check. |
-| P5 | Which model runs the agent? | The same open decision as for the classification (D1). Build with a scripted stand-in first and swap the model in later, as before. |
-| P6 | Who fills the registry for the pilot? | The team, by hand, from the websites of the municipality: authority, department and contact per category. The agent can prepare drafts of these entries, a person checks them. |
+| P1 | Where does the address come from? | From the phone (Apple geocoder), editable by the user. No geocoder on our server. |
+| P2 | **Which web search provider?** It needs an account and a key, and a privacy check (EU or not, terms). | Put it behind an interface and build the agent with a scripted stand-in first. The team picks the candidates, I build the adapter and we measure (as with the classification). Some model providers have a built-in search tool, worth checking for Mistral (not verified). |
+| P3 | **Which countries and languages for the test?** Where do the students come from? | Start with the countries of the team, the agent works in the language of the place. Say which, so the evaluation set covers them. |
+| P4 | Which model runs the agent? It needs tool calling and reading. | The same open decision as for the classification (D1). Build with a scripted stand-in first and swap the model later. |
+| P5 | Registry as a memory that grows with confirmations? | Yes. It is what makes the second user of a place cheap and consistent. |
+| P6 | In which language is the draft written? | In the language of the authority's place (the agent reports it). The app shows the user a short German summary next to it. |
 
 ## Steps
 
 | # | What | Owner | Effort | Done when |
 |---|---|---|---|---|
 | R0 | Decide P1 to P6 | You, Team | S | written into the decision log |
-| R1 | Collect the registry data for the pilot municipality: per category the authority, the department, the channel, the source URL | Team, Claude | M | a reviewed file with source URLs |
-| R2 | Contract: `Channel`, `ResearchResult`, the registry entry, strict models with tests | Claude | S | tests green |
-| R3 | Boundary data of the pilot area and the offline municipality lookup | Claude | M | a coordinate gives the municipality, outside the area gives "unknown" |
-| R4 | Registry loader and lookup (files into a table, migration `006`), a hit needs no model | Claude | M | a report in the pilot area gets a verified result |
-| R5 | Put it into the chain: node `research`, status `researched`, the answer in the endpoint and in `GET /v1/reports/{id}` | Claude | M | the result comes back with the report, a failure leaves the report `classified` |
-| R6 | App: show the authority and the channel instead of the scripted "Zuständig: Ordnungsamt Musterstadt" | Claude | S | the mock lines are gone |
-| R7 | Research agent for the registry misses: tools, scripted stand-in, source check, suggestions table | Claude | L | a miss gives a result with sources or "unknown" |
-| R8 | Evaluation set: 20 to 30 cases (municipality, category, the authority a person checked) and a script for the hit rate, wrong answers and answers without a source | Claude, Team | M | table with numbers |
-| R9 | Real model for the agent, chosen with the classification provider decision | You, Team, Claude | M | decision with numbers |
+| R1 | Contract: `Place`, `Channel`, `ResearchResult`, strict models with tests | Claude | S | tests green |
+| R2 | App: turn the position into a `Place` with the phone's geocoder, show one editable line, send the fields. Backend: take them in, validate, store | Claude | M | the place arrives and is stored |
+| R3 | The safe page fetcher with its limits and tests (private addresses, redirects, size, time) | Claude | M | the attacks of the tests are refused |
+| R4 | Search provider interface and a scripted stand-in, the agent graph with source check | Claude | L | a scripted run gives a result with sources, an answer without a source is dropped |
+| R5 | Registry as a memory: table (migration `006`), lookup first, write on confirmation, expiry | Claude | M | the second report of a place needs no model |
+| R6 | Put it into the chain: node `research`, status `researched`, the answer in the endpoint and `GET /v1/reports/{id}` | Claude | M | the result comes back with the report |
+| R7 | App: show authority, contact and the source links, the actions confirm, wrong authority, enter by hand | Claude | M | the mock lines are gone |
+| R8 | Evaluation set: 15 to 20 real places (the home towns of the team) with the authority a person checked, and a script for the hit rate, answers without a source and time | Team, Claude | M | table with numbers |
+| R9 | Real search provider and real model, chosen with the classification decision | You, Team, Claude | M | decision with numbers |
 
-Order: R0 → R1 and R2 and R3 in parallel → R4 → R5 → R6 → R7 and R8 → R9.
-The first useful result needs **no model**: R1 to R6 give a working "responsible authority" from the registry alone.
+Order: R0 → R1 → R2 and R3 in parallel → R4 → R5 → R6 → R7, R8 → R9.
+The chain works end to end with the stand-ins first, the real search and the real model are swapped in at the end.
 
 ## Targets (proposals, please confirm in R0)
 
-| Measure | Target |
+| Measure | Target on the evaluation set |
 |---|---|
-| Registry hits in the pilot area that are correct | 100 % (the data is checked by a person, a miss here is a data error) |
-| Agent answers with a source that supports them | 100 % |
-| Agent: wrong authority stated as sure (confidence high) | 0 on the evaluation set |
-| Agent: no answer where it cannot find one | allowed, better than a guess |
-| Time for a registry hit | under 1 second |
+| Authority correct (judged by the team member from that place) | at least 70 % at the first try, to be raised later |
+| Answers with a source that supports them | 100 % |
+| Answers stated as sure that are wrong | 0 (better "not found" than a wrong sure one) |
+| Contact that exists (an address with a valid form, a page that loads) | 100 % of the answers |
+| Time of one research | under 30 seconds, from memory under 1 second |
+| Cost of one research | measured in R9, then set |
 
 ## Risks
 
-- **Wrong or outdated contacts.** The registry has a check date and a source for every entry, and old entries are flagged. A real sending needs `verified`.
-- **Responsibility is not always clear.** A road can belong to the city, the district or the state, a playground to the city or a private owner. The registry key is (municipality, category) today. If that is too coarse, a rule per road class or an owner field comes later. This is exactly why a wrong-authority action exists in the app.
-- **Pages with hidden orders.** The agent cannot act on them (it only reads and answers in a schema) and every claim needs a source.
-- **Scraping rules.** Only the pages of the municipality, `robots.txt` respected, few requests, cached. Check the terms of use before any broader fetching.
-- **The pilot is one place.** It proves the idea, not that it works for every municipality. That is the reason for a second municipality.
+- **Quality differs a lot by place.** A big city has a clear page, a small village in another country may have none. The honest answer is "not found", and the user then adds the recipient. The target of 70 % is a guess until R8.
+- **Responsibility is not always clear.** A road can belong to the city, the district or the state. The key (country, municipality, category) is coarse. A rule per road class comes later if the evaluation shows it.
+- **Pages with hidden orders.** The agent cannot act on them and every claim needs a source, but a page can still lead it to a wrong answer. The user sees the sources and approves.
+- **The fetcher is an attack surface.** It reads addresses that a search or a page chose. That is why it is plain code with strict limits and its own tests.
+- **Cost and speed.** A research with several searches and pages takes seconds and tokens. The memory and the limits per run keep it small. The answer by polling (classification plan C8) becomes necessary.
+- **A wrong confirmation poisons the memory.** One user clicking "confirm" is not proof. Real sending needs `verified` by the team, and the count of confirmations tells how much to trust an entry.

@@ -98,7 +98,7 @@ Waits for the architecture overview of the team.
 | 5.6 | Approval pause (interrupt) and the actions approve, revise, wrong authority, close | Claude | L |
 | 5.7 | Outbound connectors (Open311, email, web form), simulated sending first | Claude | L |
 | 5.8 | Email connector as second input: extract the place from the text, attachments, lowercase the mime type | Claude | L |
-| 5.9 | Categories fixed or configurable per municipality, example municipality | Team | M |
+| 5.9 | Categories fixed or configurable per municipality (an example municipality is not needed, the research works for any place, see [research-plan.md](research-plan.md)) | Team | M |
 | 5.10 | Authority dashboard (a web view, for example on Vercel) | Claude, Team | L |
 | 5.11 | Check the name (App Store, domain) | You | S |
 | 5.12 | Open question: may the authority contact the reporter? (decides whether the identifier must be stored encrypted) | Team | M |
