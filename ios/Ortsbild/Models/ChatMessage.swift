@@ -39,6 +39,8 @@ enum ChatContent {
     case draft(ReportDraft)
     /// Emergency: only a hint to call 110 / 112, no ticket.
     case emergency
+    /// The report after the privacy layer: cleaned photo and text, and what was removed.
+    case sanitized(SanitizedResult)
 }
 
 struct ChatMessage: Identifiable {

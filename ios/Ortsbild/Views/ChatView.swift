@@ -11,6 +11,8 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     /// Action the user tried before being signed in. It runs once the sign-in succeeds.
     @State private var pendingAction: DraftAction?
+    /// The user pressed send before being signed in, the report is sent once the sign-in succeeds.
+    @State private var pendingSend = false
 
     // TODO: Move texts into a String Catalog (localization), German only for now
 
@@ -43,7 +45,7 @@ struct ChatView: View {
                     text: $viewModel.inputText,
                     photo: $viewModel.attachedPhoto,
                     canSend: viewModel.canSend,
-                    onSend: viewModel.send
+                    onSend: handleSend
                 )
             }
             .navigationTitle("Ortsbild")
@@ -60,20 +62,38 @@ struct ChatView: View {
             }
             .sheet(
                 isPresented: Binding(get: { auth.isSheetPresented }, set: { auth.isSheetPresented = $0 }),
-                onDismiss: { pendingAction = nil }
+                onDismiss: {
+                    pendingAction = nil
+                    pendingSend = false
+                }
             ) {
                 AccountSheet()
             }
             .onChange(of: auth.isSignedIn) {
-                if auth.isSignedIn, let action = pendingAction {
+                guard auth.isSignedIn else { return }
+                if let action = pendingAction {
                     pendingAction = nil
                     viewModel.perform(action)
+                }
+                if pendingSend {
+                    pendingSend = false
+                    viewModel.send()
                 }
             }
         }
     }
 
-    /// Sending a report requires an account, everything else works without one.
+    /// Sending a report requires an account, the server accepts only signed-in users.
+    private func handleSend() {
+        if auth.isSignedIn {
+            viewModel.send()
+        } else {
+            pendingSend = true
+            auth.isSheetPresented = true
+        }
+    }
+
+    /// Actions on a draft: approving needs an account, everything else works without one.
     private func handle(_ action: DraftAction) {
         if action == .approve, !auth.isSignedIn {
             pendingAction = action
@@ -109,11 +129,13 @@ private struct MessageRow: View {
             DraftCard(draft: draft, isEnabled: isActive, onAction: onAction)
         case .emergency:
             EmergencyBanner()
+        case .sanitized(let result):
+            SanitizedCard(result: result)
         }
     }
 }
 
 #Preview {
     ChatView()
-        .environment(AuthViewModel())
+        .environment(AuthViewModel(service: MockAuthService()))
 }

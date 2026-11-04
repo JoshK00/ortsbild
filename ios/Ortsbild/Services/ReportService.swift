@@ -5,7 +5,7 @@
 
 import UIKit
 
-/// Interface to the backend. The app runs against `MockReportService` first.
+/// Interface to the backend. `MockReportService` is the scripted stand-in for previews and for the steps the backend does not have yet.
 protocol ReportService {
     /// New user input (photo and/or text). The agent's replies arrive one after another.
     func respond(photo: UIImage?, text: String?) -> AsyncStream<ChatContent>

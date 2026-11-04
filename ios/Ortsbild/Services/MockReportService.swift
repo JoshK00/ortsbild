@@ -9,10 +9,7 @@ import UIKit
 struct MockReportService: ReportService {
 
     func respond(photo: UIImage?, text: String?) -> AsyncStream<ChatContent> {
-        // TODO: Emergency detection will later run through Claude Vision, for now only a keyword search in the text
-        let emergencyKeywords = ["feuer", "brand", "verletzt", "gewalt", "unfall"]
-        let lowered = text?.lowercased() ?? ""
-        if emergencyKeywords.contains(where: lowered.contains) {
+        if EmergencyCheck.matches(text) {
             return stream([(.emergency, 0.6)])
         }
 

@@ -15,8 +15,8 @@ final class ChatViewModel {
 
     private let service: ReportService
 
-    init(service: ReportService = MockReportService()) {
-        self.service = service
+    init(service: ReportService? = nil) {
+        self.service = service ?? AppServices.reports
         messages = [
             ChatMessage(
                 sender: .agent,

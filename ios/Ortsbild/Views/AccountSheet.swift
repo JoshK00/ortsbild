@@ -60,8 +60,7 @@ struct AccountSheet: View {
                 .multilineTextAlignment(.center)
 
             SignInWithAppleButton(.signIn) { request in
-                // No name or e-mail needed, the pseudonymous ID is enough.
-                request.requestedScopes = []
+                auth.prepare(request)
             } onCompletion: { result in
                 auth.handle(result)
             }
@@ -83,7 +82,7 @@ struct AccountSheet: View {
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
             }
-            // TODO: Show the user's own reports once `GET /reports` exists
+            // TODO: Show the user's own reports once `GET /v1/reports` (the list) exists
 
             Button("Abmelden") {
                 auth.signOut()
@@ -110,5 +109,5 @@ struct AccountSheet: View {
 
 #Preview("Abgemeldet") {
     AccountSheet()
-        .environment(AuthViewModel())
+        .environment(AuthViewModel(service: MockAuthService()))
 }
