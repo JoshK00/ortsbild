@@ -46,8 +46,15 @@ enum ChatContent {
 }
 
 struct ChatMessage: Identifiable {
-    let id = UUID()
+    let id: UUID
     let sender: MessageSender
     let content: ChatContent
-    let date = Date()
+    let date: Date
+
+    init(id: UUID = UUID(), sender: MessageSender, content: ChatContent, date: Date = Date()) {
+        self.id = id
+        self.sender = sender
+        self.content = content
+        self.date = date
+    }
 }

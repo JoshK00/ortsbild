@@ -18,10 +18,15 @@ final class ChatViewModel {
     private(set) var processingSince = Date()
 
     private let service: ReportService
+    private let ticketID: UUID
+    private let store: TicketStore
 
-    init(service: ReportService? = nil) {
+    init(ticketID: UUID, store: TicketStore, service: ReportService? = nil) {
+        self.ticketID = ticketID
+        self.store = store
         self.service = service ?? AppServices.reports
-        messages = [
+        // A ticket that was written before is read back, a new one starts with the greeting
+        messages = store.loadMessages(for: ticketID) ?? [
             ChatMessage(
                 sender: .agent,
                 // TODO: Show these photo tips as an overlay in the camera view too, and warn before the upload if faces are visible (Apple Vision)
@@ -29,6 +34,9 @@ final class ChatViewModel {
             )
         ]
     }
+
+    /// The title for the top of the screen.
+    var title: String { TicketText.title(from: messages) }
 
     var canSend: Bool {
         let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -64,6 +72,9 @@ final class ChatViewModel {
 
     private func append(_ sender: MessageSender, _ content: ChatContent) {
         messages.append(ChatMessage(sender: sender, content: content))
+        // TODO: If the app is closed while the server is still working, the answer is not in the chat when it is opened again.
+        // Fetch it with GET /v1/reports/{id} once the report id is kept with the message.
+        store.save(messages, for: ticketID)
     }
 
     private func run(_ stream: AsyncStream<ChatContent>) {

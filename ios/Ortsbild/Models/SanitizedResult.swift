@@ -106,9 +106,14 @@ struct SanitizedResult {
     let changes: [String]
 
     init(text: String?, photo: UIImage?, entries: [RedactionEntryDTO]) {
+        self.init(text: text, photo: photo, changes: entries.compactMap(Self.describe))
+    }
+
+    /// From lines that were made before, for a chat that is read back from the phone.
+    init(text: String?, photo: UIImage?, changes: [String]) {
         self.text = text
         self.photo = photo
-        self.changes = entries.compactMap(Self.describe)
+        self.changes = changes
     }
 
     nonisolated private static func describe(_ entry: RedactionEntryDTO) -> String? {

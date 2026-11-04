@@ -5,87 +5,87 @@
 
 import SwiftUI
 
-/// Main screen: conversation between user and AI.
+/// The chat of one report: conversation between user and AI. It is opened from the list of reports.
 struct ChatView: View {
     @Environment(AuthViewModel.self) private var auth
-    @State private var viewModel = ChatViewModel()
+    @State private var viewModel: ChatViewModel
     /// Action the user tried before being signed in. It runs once the sign-in succeeds.
     @State private var pendingAction: DraftAction?
     /// The user pressed send before being signed in, the report is sent once the sign-in succeeds.
     @State private var pendingSend = false
 
+    init(ticketID: UUID, store: TicketStore) {
+        _viewModel = State(initialValue: ChatViewModel(ticketID: ticketID, store: store))
+    }
+
     // TODO: Move texts into a String Catalog (localization), German only for now
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(viewModel.messages) { message in
-                            MessageRow(
-                                message: message,
-                                isActive: message.id == viewModel.messages.last?.id && !viewModel.isProcessing,
-                                onOption: viewModel.choose(option:),
-                                onAction: handle(_:)
-                            )
-                            .id(message.id)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(viewModel.messages) { message in
+                        MessageRow(
+                            message: message,
+                            isActive: message.id == viewModel.messages.last?.id && !viewModel.isProcessing,
+                            onOption: viewModel.choose(option:),
+                            onAction: handle(_:)
+                        )
+                        .id(message.id)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: viewModel.messages.count) {
-                    guard let last = viewModel.messages.last else { return }
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 8) {
-                    if viewModel.isProcessing {
-                        ActivityBar(text: viewModel.activity, since: viewModel.processingSince)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                    ComposerBar(
-                        text: $viewModel.inputText,
-                        photo: $viewModel.attachedPhoto,
-                        canSend: viewModel.canSend,
-                        onSend: handleSend
-                    )
-                }
-                .animation(.easeInOut(duration: 0.2), value: viewModel.isProcessing)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: viewModel.messages.count) {
+                guard let last = viewModel.messages.last else { return }
+                withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
             }
-            .navigationTitle("Ortsbild")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        auth.isSheetPresented = true
-                    } label: {
-                        Image(systemName: auth.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
-                    }
-                    .accessibilityLabel("Konto")
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 8) {
+                if viewModel.isProcessing {
+                    ActivityBar(text: viewModel.activity, since: viewModel.processingSince)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+                ComposerBar(
+                    text: $viewModel.inputText,
+                    photo: $viewModel.attachedPhoto,
+                    canSend: viewModel.canSend,
+                    onSend: handleSend
+                )
             }
-            .sheet(
-                isPresented: Binding(get: { auth.isSheetPresented }, set: { auth.isSheetPresented = $0 }),
-                onDismiss: {
-                    pendingAction = nil
-                    pendingSend = false
+            .animation(.easeInOut(duration: 0.2), value: viewModel.isProcessing)
+        }
+        .navigationTitle(viewModel.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    auth.isSheetPresented = true
+                } label: {
+                    Image(systemName: auth.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
                 }
-            ) {
-                AccountSheet()
+                .accessibilityLabel("Konto")
             }
-            .onChange(of: auth.isSignedIn) {
-                guard auth.isSignedIn else { return }
-                if let action = pendingAction {
-                    pendingAction = nil
-                    viewModel.perform(action)
-                }
-                if pendingSend {
-                    pendingSend = false
-                    viewModel.send()
-                }
+        }
+        .onChange(of: auth.isSheetPresented) {
+            // The sheet is closed without a sign-in: forget what was waiting for it
+            if !auth.isSheetPresented, !auth.isSignedIn {
+                pendingAction = nil
+                pendingSend = false
+            }
+        }
+        .onChange(of: auth.isSignedIn) {
+            guard auth.isSignedIn else { return }
+            if let action = pendingAction {
+                pendingAction = nil
+                viewModel.perform(action)
+            }
+            if pendingSend {
+                pendingSend = false
+                viewModel.send()
             }
         }
     }
@@ -145,6 +145,8 @@ private struct MessageRow: View {
 }
 
 #Preview {
-    ChatView()
-        .environment(AuthViewModel(service: MockAuthService()))
+    NavigationStack {
+        ChatView(ticketID: UUID(), store: .preview)
+    }
+    .environment(AuthViewModel(service: MockAuthService()))
 }

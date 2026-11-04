@@ -11,7 +11,9 @@ struct AccountSheet: View {
     @Environment(AuthViewModel.self) private var auth
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
+    @Environment(TicketStore.self) private var store
     @State private var confirmsDeletion = false
+    @State private var confirmsHistoryDeletion = false
 
     // TODO: Move texts into a String Catalog (localization), German only for now
 
@@ -89,6 +91,22 @@ struct AccountSheet: View {
             }
             .buttonStyle(.bordered)
 
+            Button("Verlauf auf diesem iPhone löschen", role: .destructive) {
+                confirmsHistoryDeletion = true
+            }
+            .buttonStyle(.bordered)
+            .confirmationDialog(
+                "Alle Meldungen auf diesem iPhone löschen?",
+                isPresented: $confirmsHistoryDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("Verlauf löschen", role: .destructive) {
+                    store.deleteAll()
+                }
+            } message: {
+                Text("Das entfernt nur den Verlauf hier auf dem iPhone. Die Meldungen auf dem Server bleiben, bis du dein Konto löschst.")
+            }
+
             Button("Account löschen", role: .destructive) {
                 confirmsDeletion = true
             }
@@ -109,5 +127,6 @@ struct AccountSheet: View {
 
 #Preview("Abgemeldet") {
     AccountSheet()
+        .environment(TicketStore.preview)
         .environment(AuthViewModel(service: MockAuthService()))
 }

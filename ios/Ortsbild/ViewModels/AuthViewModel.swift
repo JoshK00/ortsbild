@@ -14,6 +14,8 @@ final class AuthViewModel {
     private(set) var isWorking = false
     private(set) var errorMessage: String?
     var isSheetPresented = false
+    /// Called after the account was deleted, so the history on this phone can be removed too.
+    var onAccountDeleted: (() -> Void)?
 
     private let service: AuthService
     /// Random value of the current sign-in. Apple gets only its SHA-256, the backend gets the value itself,
@@ -84,6 +86,7 @@ final class AuthViewModel {
         Task {
             do {
                 try await service.deleteAccount()
+                onAccountDeleted?()
                 state = .signedOut
             } catch {
                 errorMessage = "Der Account konnte nicht gelöscht werden. Bitte versuche es erneut."
