@@ -29,6 +29,8 @@ def is_transient_error(error: Exception) -> bool:
         ),
     ):
         return True
+    if isinstance(error, httpx.HTTPStatusError):  # an API answered 429 or 5xx
+        return error.response.status_code >= 500 or error.response.status_code == 429
     status = getattr(error, "status", None)  # e.g. the storage API error
     response = getattr(error, "response", None)  # boto3 ClientError
     if status is None and isinstance(response, dict):

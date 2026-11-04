@@ -62,4 +62,12 @@ def provider_from_env() -> ClassificationProvider:
     name = os.getenv("CLASSIFICATION_PROVIDER", "rules")
     if name == "rules":
         return RuleBasedProvider()
+    if name == "mistral":
+        from classification.mistral import DEFAULT_BASE_URL, DEFAULT_MODEL, MistralProvider
+
+        return MistralProvider(
+            os.environ["MISTRAL_KEY"],
+            os.getenv("MISTRAL_MODEL", DEFAULT_MODEL),
+            os.getenv("MISTRAL_BASE_URL", DEFAULT_BASE_URL),
+        )
     raise ValueError(f"unknown CLASSIFICATION_PROVIDER: {name}")

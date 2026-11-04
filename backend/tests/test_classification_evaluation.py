@@ -37,8 +37,8 @@ def test_the_shipped_cases_are_well_formed():
     assert len({c["id"] for c in cases}) == len(cases)
     for c in cases:
         assert c["category"] is None or c["category"] in CATEGORIES
-        assert (c["category"] is None) == (c["lane"] is None)
-        assert isinstance(c["emergency"], bool) and c.get("text")
+        assert c["lane"] is None or c["category"] is not None  # a lane only together with a category
+        assert isinstance(c["emergency"], bool) and (c.get("text") or c.get("photo"))
 
 
 def test_the_shipped_cases_cover_every_category_emergencies_injection_and_false_alarms():
@@ -51,7 +51,8 @@ def test_the_shipped_cases_cover_every_category_emergencies_injection_and_false_
 
 def test_the_stand_in_finds_every_emergency_of_the_shipped_cases():
     """The keyword search is the second line, on our own cases it must not miss one."""
-    summary = summarize(run_cases(load_cases(CASES_FILE), lambda store: Classifier(RuleBasedProvider(), store)))
+    text_cases = [c for c in load_cases(CASES_FILE) if not c.get("photo")]  # the photos are not in git
+    summary = summarize(run_cases(text_cases, lambda store: Classifier(RuleBasedProvider(), store)))
     assert summary["emergency_recall"] == 1.0 and summary["false_alarm_rate"] == 0.0
 
 
@@ -106,3 +107,33 @@ def test_a_photo_case_is_loaded_from_the_photo_folder(tmp_path):
     photo_case = {"id": "p1", "photo": "hole.jpg", "category": "pothole", "lane": "hazard", "emergency": False, "tags": []}
     run_cases([photo_case], lambda store: Classifier(Recording(), store), tmp_path)
     assert seen[0].photo and seen[0].text is None
+
+
+def test_the_pause_is_taken_between_the_cases_but_not_before_the_first_or_after_the_last():
+    waits = []
+    run_cases([case("a", "pothole"), case("b", "pothole"), case("c", "pothole")], lambda store: Classifier(Fixed(), store), pause_seconds=3, sleep=waits.append)
+    assert waits == [3, 3]
+
+
+def test_the_lane_is_not_scored_for_a_case_without_an_expected_lane():
+    summary = run(Fixed(lane="hazard"), [case("a", "pothole", lane=None), case("b", "pothole", lane="hazard"), case("c", "pothole", lane="nuisance")])
+    assert summary["lane_accuracy"] == 0.5 and summary["category_accuracy"] == 1.0
+
+
+def test_the_photo_files_named_in_the_cases_exist_if_the_folder_exists():
+    """The photos are not in git. Where the folder is there, no case may point to a missing file."""
+    folder = CASES_FILE.parent / "photos"
+    if not folder.exists():
+        return
+    for c in load_cases(CASES_FILE):
+        if c.get("photo"):
+            assert (folder / c["photo"]).exists(), c["id"]
+
+
+def test_a_measure_without_cases_is_shown_as_empty_and_not_as_a_miss():
+    report = format_summary(run(Fixed(), [case("a", "pothole")]))  # no emergency case at all
+    assert "emergency recall    n/a" in report and "[    ] emergency recall" in report
+
+
+def test_the_report_names_the_cases_with_a_wrong_category():
+    assert "cases: b" in format_summary(run(Fixed(), [case("a", "pothole"), case("b", "tree")]))

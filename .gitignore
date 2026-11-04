@@ -12,4 +12,7 @@ __pycache__/
 backend/logs/
 backend/THIRD_PARTY_NOTICES.md
 .env.prod
-backend/eval/photos/
+# Evaluation photos are real photos and never go into the repository: only the cases file and the README are tracked
+backend/eval/*
+!backend/eval/README.md
+!backend/eval/classification_cases.jsonl
