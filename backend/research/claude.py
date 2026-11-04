@@ -1,8 +1,12 @@
+import logging
+
 import anthropic
 
 from research.answer import result_from_text
 from research.models import ResearchQuery, ResearchResult
 from research.prompt import INSTRUCTIONS, user_message
+
+logger = logging.getLogger("ortsbild.research")
 
 # The model is a choice of cost against quality, it is set by ANTHROPIC_RESEARCH_MODEL
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -34,6 +38,12 @@ class ClaudeSearchProvider:
             response = self._client.messages.create(
                 model=self.model, max_tokens=MAX_ANSWER_TOKENS, system=INSTRUCTIONS, tools=tools, messages=messages,
                 output_config={"effort": "medium"},
+            )
+            usage = getattr(response, "usage", None)  # only the numbers, never the content: they show what a research costs
+            searches = getattr(getattr(usage, "server_tool_use", None), "web_search_requests", "?")
+            logger.info(
+                "claude research: model=%s input_tokens=%s output_tokens=%s searches=%s",
+                self.model, getattr(usage, "input_tokens", "?"), getattr(usage, "output_tokens", "?"), searches,
             )
             if response.stop_reason == "pause_turn":
                 # The server stopped a long search: send what it said so far and it goes on from there

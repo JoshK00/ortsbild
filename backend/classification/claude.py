@@ -1,4 +1,5 @@
 import base64
+import logging
 
 import anthropic
 from pydantic import ValidationError
@@ -6,6 +7,8 @@ from pydantic import ValidationError
 from classification.models import CATEGORIES, Classification, ClassificationInput
 from classification.prompt import SYSTEM_PROMPT, user_message
 from classification.provider import ClassificationError
+
+logger = logging.getLogger("ortsbild.classification")
 
 # The model is a choice of cost against quality, it is set by ANTHROPIC_CLASSIFICATION_MODEL
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -54,6 +57,8 @@ class ClaudeProvider:
             messages=[{"role": "user", "content": content}],
             output_config={"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}},
         )
+        usage = getattr(response, "usage", None)  # only the numbers, never the content: they show what a report costs
+        logger.info("claude classification: model=%s input_tokens=%s output_tokens=%s", self.model, getattr(usage, "input_tokens", "?"), getattr(usage, "output_tokens", "?"))
         if response.stop_reason in ("refusal", "max_tokens"):
             raise ClassificationError(f"no usable answer: {response.stop_reason}")
         text = next((block.text for block in response.content if block.type == "text"), "")

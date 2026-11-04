@@ -132,3 +132,13 @@ def test_an_empty_key_is_refused_and_the_provider_comes_from_the_environment(mon
     monkeypatch.delenv("ANTHROPIC_KEY")
     with pytest.raises(KeyError):
         provider_from_env()
+
+
+def test_the_usage_is_logged_as_numbers_only(caplog):
+    import logging
+
+    response = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text=json.dumps(ANSWER))], usage=SimpleNamespace(input_tokens=1500, output_tokens=40))
+    provider, _ = provider_with(response)
+    with caplog.at_level(logging.INFO, logger="ortsbild.classification"):
+        provider.classify(ClassificationInput(text="secret report text"))
+    assert "input_tokens=1500 output_tokens=40" in caplog.text and "secret" not in caplog.text
