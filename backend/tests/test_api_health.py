@@ -87,10 +87,17 @@ def test_model_checks_fail_for_a_broken_model():
 # ---------------------------------------------------------------------------
 
 
+KEY = {"X-API-Key": "k"}
+
+
+def make_client(checks):
+    return TestClient(create_app(checks, api_key="k", configure_logging=False))
+
+
 def test_health_is_200_when_everything_works():
-    """The endpoint reports ok with one entry per check."""
-    with TestClient(create_app({"models": ok, "storage": ok}, configure_logging=False)) as client:
-        response = client.get("/health")
+    """The endpoint reports ok with one entry per check, for a caller with the API key."""
+    with make_client({"models": ok, "storage": ok}) as client:
+        response = client.get("/health", headers=KEY)
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert response.json()["checks"]["models"] == {"ok": True, "detail": "ok"}
@@ -98,15 +105,45 @@ def test_health_is_200_when_everything_works():
 
 def test_health_is_503_and_names_the_failing_part():
     """One broken part makes the whole answer 503, so a monitor notices it."""
-    with TestClient(create_app({"models": ok, "storage": failing}, configure_logging=False)) as client:
-        response = client.get("/health")
+    with make_client({"models": ok, "storage": failing}) as client:
+        response = client.get("/health", headers=KEY)
     body = response.json()
     assert response.status_code == 503 and body["status"] == "degraded"
     assert body["checks"]["storage"] == {"ok": False, "detail": "RuntimeError"}
     assert "sb_secret_123" not in response.text
 
 
+def test_health_without_the_key_shows_only_the_status():
+    """A stranger learns that the system is up, not how it is built or what is wrong."""
+    with make_client({"models": ok, "storage": failing}) as client:
+        anonymous = client.get("/health")
+        wrong_key = client.get("/health", headers={"X-API-Key": "wrong"})
+    for response in (anonymous, wrong_key):
+        assert response.status_code == 503  # a monitor still sees the problem
+        assert response.json() == {"status": "degraded"}
+
+
+def test_health_shows_no_details_when_no_key_is_configured():
+    """Fail closed: without a configured key nobody gets the details."""
+    with TestClient(create_app({"models": ok}, api_key="", configure_logging=False)) as client:
+        assert client.get("/health", headers={"X-API-Key": ""}).json() == {"status": "ok"}
+
+
+def test_health_checks_are_not_repeated_for_every_request():
+    """A flood of requests must not trigger the model and storage checks each time."""
+    calls = []
+
+    def counting():
+        calls.append(1)
+
+    with make_client({"models": counting}) as client:
+        calls.clear()  # forget the run at startup
+        for _ in range(5):
+            client.get("/health")
+    assert len(calls) <= 1
+
+
 def test_app_starts_even_if_a_check_fails():
     """A missing model must not stop the app, /health shows it instead."""
-    with TestClient(create_app({"models": failing}, configure_logging=False)) as client:
+    with make_client({"models": failing}) as client:
         assert client.get("/health").status_code == 503

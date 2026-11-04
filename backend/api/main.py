@@ -1,9 +1,11 @@
+import hmac
 import logging
 import os
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from fastapi.responses import JSONResponse
 
 from api.health import CheckResult, model_checks, run_checks
@@ -75,23 +77,38 @@ def create_app(
 
     app = FastAPI(title="Ortsbild", lifespan=lifespan)
 
+    HEALTH_CACHE_SECONDS = 15
+
+    def current_api_key() -> str | None:
+        return api_key if api_key is not None else os.getenv("API_KEY")
+
+    def cached_results() -> list[CheckResult]:
+        """Run the checks at most every 15 seconds, so a flood of requests cannot make the server load models and call storage and database each time."""
+        cache = getattr(app.state, "health_cache", None)
+        if cache is None or time.monotonic() - cache[0] > HEALTH_CACHE_SECONDS:
+            cache = (time.monotonic(), run_checks(app.state.checks))
+            app.state.health_cache = cache
+        return cache[1]
+
     @app.get("/health")
-    def health() -> JSONResponse:
-        """200 if every model, the object storage and the database work, 503 with the failing parts otherwise."""
-        results: list[CheckResult] = run_checks(app.state.checks)
+    def health(x_api_key: str | None = Header(default=None)) -> JSONResponse:
+        """200 if every model, the object storage and the database work, 503 otherwise.
+
+        Everybody gets only the status. The names of the checks and what is wrong are shown
+        only with the API key, they tell a stranger how the system is built.
+        """
+        results = cached_results()
         healthy = all(result.ok for result in results)
-        return JSONResponse(
-            status_code=200 if healthy else 503,
-            content={
-                "status": "ok" if healthy else "degraded",
-                "checks": {r.name: {"ok": r.ok, "detail": r.detail} for r in results},
-            },
-        )
+        content: dict = {"status": "ok" if healthy else "degraded"}
+        expected = current_api_key()
+        if expected and x_api_key and hmac.compare_digest(x_api_key, expected):
+            content["checks"] = {r.name: {"ok": r.ok, "detail": r.detail} for r in results}
+        return JSONResponse(status_code=200 if healthy else 503, content=content)
 
     app.include_router(
         create_reports_router(
             get_services=lambda: app.state.services,
-            get_api_key=lambda: api_key if api_key is not None else os.getenv("API_KEY"),
+            get_api_key=current_api_key,
         )
     )
     return app
