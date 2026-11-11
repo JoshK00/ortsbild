@@ -33,7 +33,30 @@ struct ClarificationTests {
             return AsyncStream { $0.finish() }
         }
 
-        func perform(_ action: DraftAction) -> AsyncStream<ChatContent> { AsyncStream { $0.finish() } }
+        var performed: [(action: DraftAction, reportID: String?)] = []
+
+        func perform(_ action: DraftAction, reportID: String?) -> AsyncStream<ChatContent> {
+            performed.append((action, reportID))
+            return AsyncStream { $0.finish() }
+        }
+
+        /// What `removePhoto` answers, and which reports it was asked about.
+        var photoRemoval: PhotoRemoval = .removed(draftBody: nil)
+        var photoRemovals: [String?] = []
+
+        func removePhoto(reportID: String?) async -> PhotoRemoval {
+            photoRemovals.append(reportID)
+            return photoRemoval
+        }
+
+        /// What `deleteReport` answers, and which reports it was asked about.
+        var deletion: ReportDeletion = .deleted
+        var deletions: [String?] = []
+
+        func deleteReport(reportID: String?) async -> ReportDeletion {
+            deletions.append(reportID)
+            return deletion
+        }
     }
 
     private func makeStore() -> TicketStore {
@@ -180,5 +203,43 @@ struct ClarificationTests {
         var contents: [ChatContent] = []
         for await content in service.answer("Graffiti", reportID: nil) { contents.append(content) }
         #expect(contents.count == 1)
+    }
+
+    // MARK: - Duplicates and votes
+
+    private func decodeCase(_ json: String) throws -> CaseDTO? {
+        let body = """
+        {"id": "abc", "status": "sanitized", "photo_urls": [], "case": \(json)}
+        """
+        return try JSONDecoder().decode(ReportResponse.self, from: Data(body.utf8)).caseInfo
+    }
+
+    @Test func theCaseOfTheBackendIsDecoded() throws {
+        let info = try decodeCase(#"{"votes": 3, "is_duplicate": true, "first_reported_at": "2026-11-09T10:00:00+00:00"}"#)
+        #expect(info == CaseDTO(votes: 3, isDuplicate: true))
+    }
+
+    @Test func theCaseIdForTheDashboardIsDecodedWhenThereIsOne() throws {
+        let info = try decodeCase(#"{"votes": 2, "is_duplicate": true, "first_reported_at": "x", "case_id": "0123456789abcdef"}"#)
+        #expect(info?.caseId == "0123456789abcdef")
+        let withNull = try decodeCase(#"{"votes": 2, "is_duplicate": true, "first_reported_at": "x", "case_id": null}"#)
+        #expect(withNull?.caseId == nil)
+    }
+
+    @Test func aReportWithoutACaseStillDecodes() throws {
+        #expect(try decodeCase("null") == nil)
+    }
+
+    @Test func aDuplicateTellsTheUserAboutTheVote() throws {
+        let info = try #require(try decodeCase(#"{"votes": 2, "is_duplicate": true, "first_reported_at": "x"}"#))
+        let message = try #require(info.message)
+        #expect(message == "Dieses Problem wurde hier schon gemeldet. Mit deiner Freigabe zählt deine Meldung als weitere Stimme (dann 2).")
+    }
+
+    @Test func theFirstReportOfADefectSaysNothing() throws {
+        let first = try #require(try decodeCase(#"{"votes": 1, "is_duplicate": false, "first_reported_at": "x"}"#))
+        #expect(first.message == nil)
+        let reporterOfTheCase = try #require(try decodeCase(#"{"votes": 4, "is_duplicate": false, "first_reported_at": "x"}"#))
+        #expect(reporterOfTheCase.message == nil)  // the first reporter is not told again, the votes are for the authority
     }
 }

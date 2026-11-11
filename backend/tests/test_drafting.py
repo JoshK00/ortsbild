@@ -13,7 +13,7 @@ from drafting.claude import MAX_ANSWER_TOKENS, SCHEMA, ClaudeDraftProvider
 from drafting.models import Draft, DraftContent, DraftInput
 from drafting.prompt import SYSTEM_PROMPT, user_message
 from drafting.provider import DraftError, TemplateDraftProvider, provider_from_env
-from drafting.service import Drafter, address_line, facts_block
+from drafting.service import Drafter, strip_facts_block
 from models.incoming_report import Place
 from models.sanitized_report import RedactionLog, SanitizedReport
 from research.models import Channel, ResearchResult
@@ -102,27 +102,21 @@ def test_without_a_text_or_an_authority_the_message_says_so():
 
 
 # ---------------------------------------------------------------------------
-# The facts that our code writes
+# The old facts block (location, map link, attachment) is not written any more
 # ---------------------------------------------------------------------------
 
-
-def test_the_address_is_one_line_from_the_parts_of_the_phone():
-    assert address_line(PLACE) == "Hauptstraße 12, 80331 München, DE"
-    assert address_line(Place(municipality="Wien")) == "Wien"
-    assert address_line(Place(street="Weg", house_number="3")) == "Weg 3"
-    assert address_line(None) == ""
-
-
-def test_the_facts_block_has_the_location_the_map_link_and_the_attachment():
-    block = facts_block(make_report(photos=[{"id": "p1", "mime_type": "image/jpeg", "ref": "clean/r1/p1.jpg"}]))
-    assert "Standort / Location: Hauptstraße 12, 80331 München, DE | 48.13712, 11.57541" in block
-    assert "https://www.openstreetmap.org/?mlat=48.13712&mlon=11.57541" in block
-    assert "Anhang / Attachment: Foto / photo" in block
+OLD_BLOCK = (
+    "Standort / Location: Hauptstraße 12, 80331 München, DE | 48.13712, 11.57541\n"
+    "https://www.openstreetmap.org/?mlat=48.13712&mlon=11.57541#map=19/48.13712/11.57541\n"
+    "Anhang / Attachment: Foto / photo"
+)
 
 
-def test_without_a_place_or_a_photo_only_the_coordinates_are_there():
-    block = facts_block(make_report(place=None))
-    assert block.startswith("Standort / Location: 48.13712, 11.57541") and "Anhang" not in block
+def test_the_old_facts_block_is_cut_from_a_letter_when_it_is_read():
+    letter = "Sehr geehrte Damen und Herren,\n\nein Loch.\n\nMit freundlichen Grüßen"
+    assert strip_facts_block(f"{letter}\n\n{OLD_BLOCK}") == letter
+    assert strip_facts_block(letter) == letter  # a letter without the block stays as it is
+    assert strip_facts_block(f"{letter}\n\nStandort / Location: 1, 2") == letter  # also without the link and the attachment
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +124,11 @@ def test_without_a_place_or_a_photo_only_the_coordinates_are_there():
 # ---------------------------------------------------------------------------
 
 
-def test_the_draft_is_the_text_of_the_model_plus_the_facts_of_the_code():
+def test_the_draft_is_the_text_of_the_model_alone():
     draft = Drafter(FixedProvider()).draft(make_report(), make_classification(), make_research())
     assert draft.subject == "Schlagloch auf dem Radweg" and draft.body.startswith("Sehr geehrte Damen und Herren")
-    assert "Standort / Location: Hauptstraße 12, 80331 München, DE | 48.13712, 11.57541" in draft.body
+    assert draft.body == CONTENT["body"].strip()  # no location line, no map link, no attachment line
+    assert "Standort" not in draft.body and "openstreetmap" not in draft.body and "Anhang" not in draft.body
     assert draft.authority == "Baureferat Tiefbau" and draft.contact.target == "tiefbau@muenchen.de" and draft.language == "de"
     assert draft.summary_de == CONTENT["summary_de"] and draft.version == 1
 
@@ -145,13 +140,6 @@ def test_the_model_never_sees_the_address_the_coordinates_or_the_photo():
     seen = repr(data)
     assert "Hauptstraße" not in seen and "48.137" not in seen and "München" not in seen and "rep-1" not in seen
     assert data.text == "Tiefes Loch im Radweg" and data.authority == "Baureferat Tiefbau"
-
-
-def test_the_address_comes_from_the_phone_even_if_the_model_writes_another():
-    """The model may invent a street, the facts below its text are still the real ones."""
-    content = DraftContent(**{**CONTENT, "body": "Das Loch ist in der Erfundenstraße 99."})
-    draft = Drafter(FixedProvider(content)).draft(make_report(), make_classification(), make_research())
-    assert "Hauptstraße 12" in draft.body.split("Standort / Location:")[1]
 
 
 def test_the_language_of_the_authority_is_asked_for_and_the_default_is_german():

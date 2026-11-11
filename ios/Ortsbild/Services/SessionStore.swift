@@ -17,8 +17,13 @@ nonisolated struct Session: Codable, Equatable, Sendable {
 
 /// Keeps the session in the Keychain, so it survives a restart and no other app can read it.
 nonisolated struct SessionStore: Sendable {
-    private let service = "com.Joshua-Kehrer.Ortsbild.session"
+    private let service: String
     private let account = "backend-session"
+
+    /// `service` is the name of the Keychain entry. Tests use their own, so they never touch the real session.
+    init(service: String = "com.Joshua-Kehrer.Ortsbild.session") {
+        self.service = service
+    }
 
     func load() -> Session? {
         var query = baseQuery

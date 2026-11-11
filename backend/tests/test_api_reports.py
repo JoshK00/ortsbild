@@ -45,7 +45,8 @@ class BrokenDetector:
 class Env:
     """The app with in-memory parts, and the parts to look into."""
 
-    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None, draft_provider=None, min_confidence=0.6):
+    def __init__(self, face_detector=None, text_detector=None, reports_per_hour=None, provider=None, research_provider=None, draft_provider=None, min_confidence=0.6, demo_reporters=None):
+        self.demo_reporters = [] if demo_reporters is None else demo_reporters  # the dashboard allow list, tests add to it
         self.photo_store, self.status_store = InMemoryPhotoStore(), InMemoryReportStatusStore()
         self.pseudonym_store = InMemoryPseudonymStore("s")
         self.text_detectors = [text_detector or PatternDetector()]
@@ -62,7 +63,7 @@ class Env:
         classifier = Classifier(provider or RuleBasedProvider(), self.photo_store)
         answer_graph = build_reclassify_graph(classifier, researcher, drafter, self.status_store, min_confidence)
         services = Services(graph, self.photo_store, self.status_store, self.pseudonym_store, self.auth, followup, answer_graph, self.text_detectors)
-        self.client = TestClient(create_app(checks={}, services=services, api_key="k", configure_logging=False, reports_per_hour=reports_per_hour))
+        self.client = TestClient(create_app(checks={}, services=services, api_key="k", configure_logging=False, reports_per_hour=reports_per_hour, demo_reporters=self.demo_reporters))
 
     def __enter__(self):
         self.client.__enter__()
@@ -77,6 +78,17 @@ class Env:
     def post(self, data=None, files=None, headers=None, user="anna"):
         headers = self.login(user) if headers is None else headers
         return self.client.post("/v1/reports", data={**FORM, **(data or {})}, files=files, headers=headers)
+
+    def release(self, report_id, user="anna"):
+        return self.client.post(f"/v1/reports/{report_id}/approve", headers=self.login(user))
+
+    def post_released(self, data=None, files=None, headers=None, user="anna"):
+        """A report that the user also released, so it shows in the dashboard. Returns the answer of the release."""
+        created = self.post(data, files=files, headers=headers, user=user)
+        assert created.status_code == 200
+        released = self.release(created.json()["id"], user)
+        assert released.status_code == 200
+        return released
 
 
 # ---------------------------------------------------------------------------
@@ -576,12 +588,12 @@ class RecordingDraftProvider:
         return TemplateDraftProvider().draft(data)
 
 
-def test_the_draft_comes_back_with_the_report_and_holds_authority_contact_and_location():
+def test_the_draft_comes_back_with_the_report_and_holds_authority_and_contact():
     with Env(research_provider=ScriptedResearchProvider(FOUND)) as env:
         body = env.post({"text": "Großes Schlagloch auf dem Radweg", "lat": "48.13712", "lon": "11.57541", **PLACE}).json()
     draft = body["draft"]
     assert draft["authority"] == "Baureferat Tiefbau" and draft["contact"]["target"] == "tiefbau@muenchen.de" and draft["language"] == "de"
-    assert "Standort / Location: Hauptstraße 12, München, DE | 48.13712, 11.57541" in draft["body"] and draft["subject"] and draft["summary_de"]
+    assert "Standort" not in draft["body"] and "openstreetmap" not in draft["body"] and draft["subject"] and draft["summary_de"]
     assert env.status_store.rows[body["id"]].status == "drafted"
 
 
@@ -946,3 +958,15 @@ def test_the_words_of_another_user_are_not_accepted_and_nothing_is_stored():
         foreign = answer(env, asked["id"], env.login("ben"), text="Schlagloch 0151 2345678")
     assert foreign.status_code == 404 and len(classifier.seen) == before
     assert "0151" not in repr(env.status_store.sanitized)
+
+
+def test_a_draft_with_the_old_facts_block_is_shown_without_it():
+    """Drafts of the first versions carry the location, the map link and the attachment line under the letter, the answer cuts them."""
+    old_block = "Standort / Location: Hauptstraße 12 | 48.1, 11.5\nhttps://www.openstreetmap.org/?mlat=48.1&mlon=11.5\nAnhang / Attachment: Foto / photo"
+    with Env(research_provider=ScriptedResearchProvider(FOUND)) as env:
+        created = env.post({"text": "Großes Schlagloch auf dem Radweg", "lat": "48.1371", "lon": "11.5754", **PLACE}).json()
+        draft = env.status_store.get(created["id"]).draft
+        env.status_store.save_draft(created["id"], {**draft, "body": draft["body"] + "\n\n" + old_block})
+        shown = env.client.get(f"/v1/reports/{created['id']}", headers=env.login()).json()
+    assert shown["draft"]["body"] == draft["body"].rstrip()
+    assert "Standort" not in shown["draft"]["body"] and "openstreetmap" not in shown["draft"]["body"]

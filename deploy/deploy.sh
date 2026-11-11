@@ -20,7 +20,14 @@ echo "== copy the backend (without secrets, logs and the virtual environment)"
 rsync -az --delete -e "$SSH" \
     --exclude '.venv' --exclude '.env' --exclude 'logs' --exclude '__pycache__' \
     --exclude '.pytest_cache' --exclude 'THIRD_PARTY_NOTICES.md' \
+    --exclude 'eval/faces' --exclude 'eval/seed' \
     backend/ "$ORTSBILD_SERVER:ortsbild/backend/"
+
+echo "== copy the map file of the dashboard (only if there is one, rsync sends nothing when it did not change)"
+if [ -d tiles ]; then
+    $SSH "$ORTSBILD_SERVER" 'mkdir -p ~/ortsbild/tiles'
+    rsync -az --exclude '*.mbtiles' --exclude '*-journal' -e "$SSH" tiles/ "$ORTSBILD_SERVER:ortsbild/tiles/"
+fi
 
 echo "== copy the stack files"
 rsync -az -e "$SSH" deploy/docker-compose.prod.yml deploy/Caddyfile "$ORTSBILD_SERVER:ortsbild/deploy/"

@@ -33,7 +33,7 @@ struct ActivityBar: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .glassCard(cornerRadius: 18)
             .padding(.horizontal, 12)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Ich arbeite: \(text)")

@@ -40,6 +40,7 @@ enum TicketText {
             case .question(let text, _): return shortened(text)
             case .clarification(_, let text, _): return shortened(text)
             case .draft(let draft): return shortened(draft.subject)
+            case .dashboardLink: return "Im Dashboard sichtbar"
             case .emergency: return "Notfall: bitte 110 oder 112 anrufen"
             case .sanitized: return "Daten anonymisiert"
             case .photo(_, let caption): return caption.map { shortened($0) } ?? "Foto"

@@ -98,14 +98,6 @@ struct TicketStoreTests {
         #expect(draft.recipient == nil && draft.language == nil && draft.summaryDE == nil && draft.photo == nil)
     }
 
-    @Test func theShareTextHasTheRecipientTheSubjectAndTheBodyAndTheSharedItemsHaveThePhoto() {
-        let draft = ReportDraft(subject: "Betreff", body: "Text", authority: "Tiefbauamt", version: 1, recipient: "E-Mail: a@b.de", photo: image())
-        #expect(draft.shareText == "An: Tiefbauamt (E-Mail: a@b.de)\nBetreff: Betreff\n\nText")
-        #expect(draft.shareItems.count == 2)
-        let without = ReportDraft(subject: "Betreff", body: "Text", authority: "Empfänger noch offen", version: 1)
-        #expect(without.shareText == "Betreff: Betreff\n\nText" && without.shareItems.count == 1)
-    }
-
     @Test func theTicketListIsKeptAcrossRestartsAndSortedByTheLastChange() {
         let (store, root) = makeStore()
         let older = UUID(), newer = UUID()

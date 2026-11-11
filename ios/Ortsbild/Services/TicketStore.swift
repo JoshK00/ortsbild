@@ -23,7 +23,8 @@ private enum StoredContent: Codable {
     case status(String)
     case question(String, options: [String])
     case clarification(reportID: String, text: String, options: [String])
-    case draft(subject: String, body: String, authority: String, version: Int, recipient: String?, language: String?, summaryDE: String?, photoFile: String?)
+    case draft(subject: String, body: String, authority: String, version: Int, recipient: String?, language: String?, summaryDE: String?, photoFile: String?, reportID: String?, caseID: String?, isDeleted: Bool?)
+    case dashboardLink(caseID: String?)
     case emergency
     case sanitized(text: String?, photoFile: String?, changes: [String])
 }
@@ -74,6 +75,7 @@ final class TicketStore {
         let stored = messages.compactMap { stored(from: $0, in: folder) }
         guard let data = try? encoder.encode(stored) else { return logger.error("could not encode a ticket") }
         write(data, to: folder.appending(path: "messages.json"))
+        removePhotoFilesOfMessagesWithoutPhoto(messages, in: folder)
 
         let now = messages.last?.date ?? Date()
         let title = TicketText.title(from: messages)
@@ -138,6 +140,21 @@ final class TicketStore {
         }
     }
 
+    /// A message that lost its photo (the user took it away) must not leave the file on the phone: the photo files are named after
+    /// the message, so the file of a draft or a proof card without a photo is deleted.
+    private func removePhotoFilesOfMessagesWithoutPhoto(_ messages: [ChatMessage], in folder: URL) {
+        for message in messages {
+            switch message.content {
+            case .draft(let draft) where draft.photo == nil:
+                try? FileManager.default.removeItem(at: folder.appending(path: "\(message.id.uuidString)-draft.jpg"))
+            case .sanitized(let result) where result.photo == nil:
+                try? FileManager.default.removeItem(at: folder.appending(path: "\(message.id.uuidString)-clean.jpg"))
+            default:
+                continue
+            }
+        }
+    }
+
     /// Writes a photo once. The name comes from the message, so it is not written again on every save.
     private func savePhoto(_ image: UIImage, named name: String, in folder: URL) -> String? {
         let url = folder.appending(path: name)
@@ -169,8 +186,10 @@ final class TicketStore {
             let photoFile = draft.photo.flatMap { savePhoto($0, named: "\(message.id.uuidString)-draft.jpg", in: folder) }
             content = .draft(
                 subject: draft.subject, body: draft.body, authority: draft.authority, version: draft.version,
-                recipient: draft.recipient, language: draft.language, summaryDE: draft.summaryDE, photoFile: photoFile
+                recipient: draft.recipient, language: draft.language, summaryDE: draft.summaryDE, photoFile: photoFile,
+                reportID: draft.reportID, caseID: draft.caseID, isDeleted: draft.isDeleted ? true : nil
             )
+        case .dashboardLink(let caseID): content = .dashboardLink(caseID: caseID)
         case .emergency: content = .emergency
         case .sanitized(let result):
             let file = result.photo.flatMap { savePhoto($0, named: "\(message.id.uuidString)-clean.jpg", in: folder) }
@@ -188,11 +207,13 @@ final class TicketStore {
         case .status(let text): content = .status(text)
         case .question(let text, let options): content = .question(text, options: options)
         case .clarification(let reportID, let text, let options): content = .clarification(reportID: reportID, text: text, options: options)
-        case .draft(let subject, let body, let authority, let version, let recipient, let language, let summaryDE, let photoFile):
+        case .draft(let subject, let body, let authority, let version, let recipient, let language, let summaryDE, let photoFile, let reportID, let caseID, let isDeleted):
             content = .draft(ReportDraft(
                 subject: subject, body: body, authority: authority, version: version, recipient: recipient,
-                language: language, summaryDE: summaryDE, photo: loadPhoto(photoFile, in: folder)
+                language: language, summaryDE: summaryDE, photo: loadPhoto(photoFile, in: folder), reportID: reportID, caseID: caseID,
+                isDeleted: isDeleted ?? false
             ))
+        case .dashboardLink(let caseID): content = .dashboardLink(caseID: caseID)
         case .emergency: content = .emergency
         case .sanitized(let text, let photoFile, let changes):
             content = .sanitized(SanitizedResult(text: text, photo: loadPhoto(photoFile, in: folder), changes: changes))

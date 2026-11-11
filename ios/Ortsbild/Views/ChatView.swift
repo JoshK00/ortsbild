@@ -8,6 +8,7 @@ import SwiftUI
 /// The chat of one report: conversation between user and AI. It is opened from the list of reports.
 struct ChatView: View {
     @Environment(AuthViewModel.self) private var auth
+    @Environment(AppNavigation.self) private var navigation
     @State private var viewModel: ChatViewModel
     /// Action the user tried before being signed in. It runs once the sign-in succeeds.
     @State private var pendingAction: DraftAction?
@@ -27,9 +28,12 @@ struct ChatView: View {
                     ForEach(viewModel.messages) { message in
                         MessageRow(
                             message: message,
-                            isActive: message.id == viewModel.messages.last?.id && !viewModel.isProcessing,
+                            isActive: viewModel.isActive(message),
+                            canRemovePhoto: viewModel.canRemovePhoto(message),
                             onOption: viewModel.choose(option:),
-                            onAction: handle(_:)
+                            onAction: handle(_:),
+                            onRemovePhoto: viewModel.removePhoto,
+                            onShowDashboard: navigation.showDashboard(caseID:)
                         )
                         .id(message.id)
                     }
@@ -38,6 +42,7 @@ struct ChatView: View {
                 .padding(.vertical, 12)
             }
             .scrollDismissesKeyboard(.interactively)
+            .background { AppBackground() }
             .onChange(of: viewModel.messages.count) {
                 guard let last = viewModel.messages.last else { return }
                 withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -101,7 +106,7 @@ struct ChatView: View {
         }
     }
 
-    /// Actions on a draft: approving needs an account, everything else works without one.
+    /// Actions on a draft: releasing needs an account. Deleting asks first (in the card) and then works through the saved session.
     private func handle(_ action: DraftAction) {
         if action == .approve, !auth.isSignedIn {
             pendingAction = action
@@ -117,8 +122,11 @@ private struct MessageRow: View {
     let message: ChatMessage
     /// Only the last message can still be interacted with (follow-up question, draft).
     let isActive: Bool
+    let canRemovePhoto: Bool
     let onOption: (String) -> Void
     let onAction: (DraftAction) -> Void
+    let onRemovePhoto: () -> Void
+    let onShowDashboard: (String?) -> Void
 
     var body: some View {
         switch message.content {
@@ -134,7 +142,9 @@ private struct MessageRow: View {
                 QuickReplyBar(options: options, isEnabled: isActive, onSelect: onOption)
             }
         case .draft(let draft):
-            DraftCard(draft: draft, isEnabled: isActive, onAction: onAction)
+            DraftCard(draft: draft, isEnabled: isActive, canRemovePhoto: canRemovePhoto, onAction: onAction, onRemovePhoto: onRemovePhoto)
+        case .dashboardLink(let caseID):
+            DashboardLinkButton(caseID: caseID, onShow: onShowDashboard)
         case .emergency:
             EmergencyBanner()
         case .sanitized(let result):
@@ -145,9 +155,27 @@ private struct MessageRow: View {
     }
 }
 
+/// The button under the release: opens the dashboard on the case. It stays in the chat, so the user can find the case again.
+private struct DashboardLinkButton: View {
+    let caseID: String?
+    let onShow: (String?) -> Void
+
+    var body: some View {
+        Button {
+            onShow(caseID)
+        } label: {
+            Label("Im Dashboard ansehen", systemImage: "map")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+        .accessibilityHint("Wechselt zur Karte und zeigt deine Meldung")
+    }
+}
+
 #Preview {
     NavigationStack {
         ChatView(ticketID: UUID(), store: .preview)
     }
     .environment(AuthViewModel(service: MockAuthService()))
+    .environment(AppNavigation())
 }

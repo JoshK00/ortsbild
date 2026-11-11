@@ -38,27 +38,33 @@ struct MockReportService: ReportService {
         stream([(.text("Danke, das ist der Prototyp ohne Server."), 0.4)])
     }
 
-    func perform(_ action: DraftAction) -> AsyncStream<ChatContent> {
+    func perform(_ action: DraftAction, reportID: String?) -> AsyncStream<ChatContent> {
         // TODO: Draft versions and responsible authority will later come from the backend
         switch action {
         case .approve:
             return stream([
                 (.status("Meldung freigegeben"), 0.6),
-                (.text("Die Meldung wurde gesendet. Im Prototyp wird der Versand nur simuliert."), 1.0)
+                (.text("Deine Meldung ist jetzt im Dashboard sichtbar. (Prototyp ohne Server: nichts wurde gespeichert.)"), 0.6),
+                (.dashboardLink(caseID: nil), 0.2)
             ])
         case .revise:
             return stream([
                 (.status("Entwurf wird überarbeitet"), 0.6),
                 (.draft(Self.draft(version: 2, authority: "Ordnungsamt Musterstadt")), 1.0)
             ])
-        case .wrongAuthority:
-            return stream([
-                (.status("Zuständige Stelle wird neu recherchiert"), 0.6),
-                (.draft(Self.draft(version: 2, authority: "Stadtreinigung Musterstadt")), 1.5)
-            ])
-        case .close:
-            return stream([(.text("Die Meldung wurde geschlossen."), 0.4)])
+        case .delete:
+            return stream([])  // the deletion has a result, see `deleteReport`
         }
+    }
+
+    func deleteReport(reportID: String?) async -> ReportDeletion {
+        // The scripted prototype has no server, there is nothing to delete there
+        .deleted
+    }
+
+    func removePhoto(reportID: String?) async -> PhotoRemoval {
+        // The scripted prototype has no server, the photo is only taken out of the chat
+        .removed(draftBody: nil)
     }
 
     private static func draft(version: Int, authority: String) -> ReportDraft {

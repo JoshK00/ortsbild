@@ -24,32 +24,48 @@ struct ReportDraft {
     var summaryDE: String? = nil
     /// The cleaned photo that goes with the letter.
     var photo: UIImage? = nil
+    /// The report on the server that the draft belongs to, needed to release it. `nil` for the scripted drafts of the mock
+    /// and for drafts that were written by an older version of the app.
+    var reportID: String? = nil
+    /// The id the dashboard knows the case by, for the link "Im Dashboard ansehen". `nil` if the server sent none.
+    var caseID: String? = nil
+    /// The user deleted the report (and with it the photo) on the server. The card stays in the chat, but nothing on it works any more.
+    var isDeleted = false
     // TODO: Show user_addendum (user additions) separately from the factual part
 
-    /// The letter as one text for the share sheet: to whom, the subject and the body.
-    var shareText: String {
-        var lines: [String] = []
-        if let recipient { lines.append("An: \(authority) (\(recipient))") }
-        lines.append("Betreff: \(subject)")
-        lines.append("")
-        lines.append(body)
-        return lines.joined(separator: "\n")
+    /// The line that our server writes under the letter when a photo is attached (backend/drafting/service.py, `facts_block`).
+    static let attachmentLine = "Anhang / Attachment: Foto / photo"
+
+    /// The letter without the line that a photo is attached.
+    static func removingAttachmentLine(from body: String) -> String {
+        body.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.trimmingCharacters(in: .whitespaces) != attachmentLine }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// What the share sheet gets: the text and, if there is one, the photo.
-    var shareItems: [Any] {
-        var items: [Any] = [shareText]
-        if let photo { items.append(photo) }
-        return items
+    /// The same draft after the user took the photo away. `body` is the letter of the server, or `nil` to take the line out here.
+    func withoutPhoto(body newBody: String?) -> ReportDraft {
+        ReportDraft(
+            subject: subject, body: newBody ?? Self.removingAttachmentLine(from: body), authority: authority, version: version,
+            recipient: recipient, language: language, summaryDE: summaryDE, photo: nil, reportID: reportID, caseID: caseID,
+            isDeleted: isDeleted
+        )
+    }
+
+    /// The same draft after the user deleted the report: no photo, and the card is marked as deleted.
+    func deleted() -> ReportDraft {
+        var copy = withoutPhoto(body: nil)
+        copy.isDeleted = true
+        return copy
     }
 }
 
-/// Actions of the approval pause (see docs/documentation.md: approve, revise, wrong authority, close).
-enum DraftAction {
+/// The three actions on a draft (decided by the team on 2026-11-11): release it, revise it, delete the report.
+enum DraftAction: CaseIterable {
     case approve
     case revise
-    case wrongAuthority
-    case close
+    case delete
 }
 
 /// Content types of a chat message. They mirror the escalation levels from docs/documentation.md.
@@ -70,6 +86,8 @@ enum ChatContent {
     case activity(String)
     /// The picture could not be assigned: a question with the answers as buttons. The report id says which report is asked about.
     case clarification(reportID: String, text: String, options: [String])
+    /// The report was released and is now in the dashboard: a button that shows it there. `caseID` is `nil` if the server sent none.
+    case dashboardLink(caseID: String?)
 }
 
 struct ChatMessage: Identifiable {

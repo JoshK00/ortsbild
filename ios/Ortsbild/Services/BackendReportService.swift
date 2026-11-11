@@ -49,19 +49,135 @@ struct BackendReportService: ReportService {
         }
     }
 
-    func perform(_ action: DraftAction) -> AsyncStream<ChatContent> {
+    func perform(_ action: DraftAction, reportID: String?) -> AsyncStream<ChatContent> {
         switch action {
         case .approve:
-            // TODO: The sending is simulated (docs/plan.md 5.7). The user sends the letter with "Teilen" under the draft.
-            return immediately([
-                .status("Entwurf freigegeben"),
-                .text("Im Prototyp wird nichts automatisch gesendet. Mit „Teilen“ unter dem Entwurf kannst du die Nachricht samt Foto selbst an die Stelle schicken."),
-            ])
-        case .close:
-            return immediately([.text("Die Meldung wurde geschlossen.")])
-        case .revise, .wrongAuthority:
-            // TODO: Revise (the user's addition) and a new research without the refused authority (docs/research-plan.md)
+            // The release is stored on the server: the report is now visible in the dashboard. Nothing is sent to an authority,
+            // the dashboard replaces the single letters.
+            // TODO: A weekly update email to the authorities as a reminder (decided 2026-11-10), and an own login for them.
+            guard let reportID else {
+                return immediately([.text(Self.noReportToRelease)])
+            }
+            return AsyncStream { continuation in
+                let task = Task {
+                    let result: Result<ReportResponse, Error>
+                    do { result = .success(try await client.approve(reportID: reportID)) } catch { result = .failure(error) }
+                    Self.releaseContents(for: result).forEach { continuation.yield($0) }
+                    continuation.finish()
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        case .revise:
+            // TODO: Revise (the user's addition) is the one function of the three that is not built yet.
             return immediately([.text("Das folgt in einer späteren Version.")])
+        case .delete:
+            return immediately([])  // the deletion has a result the chat needs, see `deleteReport`, the view model does not come here
+        }
+    }
+
+    func deleteReport(reportID: String?) async -> ReportDeletion {
+        guard let reportID else { return .failed(message: Self.noReportForDeletion) }
+        let result: Result<Void, Error>
+        do { result = .success(try await client.deleteReport(reportID: reportID)) } catch { result = .failure(error) }
+        return Self.reportDeletion(for: result)
+    }
+
+    static let noReportForDeletion = "Diese Meldung stammt aus einer älteren Version der App. Ich kann sie deshalb nicht auf dem Server löschen."
+
+    /// What the answer of the server means. 404 counts as gone: the server does not have the report, which is what the user wanted.
+    static func reportDeletion(for result: Result<Void, Error>) -> ReportDeletion {
+        switch result {
+        case .success:
+            return .deleted
+        case .failure(BackendError.server(status: 404)):
+            return .deleted
+        case .failure(let error):
+            return .failed(message: deletionErrorText(error))
+        }
+    }
+
+    static func deletionErrorText(_ error: Error) -> String {
+        switch error {
+        case BackendError.notSignedIn:
+            return "Deine Anmeldung ist abgelaufen. Die Meldung ist noch nicht gelöscht. Bitte melde dich erneut an."
+        case BackendError.server(status: 503):
+            return "Die Meldung konnte nicht vollständig gelöscht werden. Sie ist noch da. Bitte versuche es später noch einmal."
+        case let error as URLError where [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost].contains(error.code):
+            return "Keine Verbindung zum Server. Die Meldung ist noch nicht gelöscht. Bitte versuche es noch einmal."
+        default:
+            return "Die Meldung konnte nicht gelöscht werden. Sie ist noch da. Bitte versuche es noch einmal."
+        }
+    }
+
+    func removePhoto(reportID: String?) async -> PhotoRemoval {
+        guard let reportID else { return .failed(message: Self.noReportForPhoto) }
+        let result: Result<ReportResponse, Error>
+        do { result = .success(try await client.deletePhoto(reportID: reportID)) } catch { result = .failure(error) }
+        return Self.photoRemoval(for: result)
+    }
+
+    static let noReportForPhoto = "Diese Meldung stammt aus einer älteren Version der App. Ich kann das Foto deshalb nicht auf dem Server löschen."
+
+    /// What the answer of the server means for the photo. Only an answer without a photo counts as deleted: an older server
+    /// that does not know the call would answer 404 or 405, and one that answers 200 with the photo still there did nothing.
+    static func photoRemoval(for result: Result<ReportResponse, Error>) -> PhotoRemoval {
+        switch result {
+        case .success(let response):
+            guard response.photoUrls.isEmpty else {
+                return .failed(message: "Der Server hat das Foto nicht gelöscht. Es ist noch da. Bitte versuche es noch einmal.")
+            }
+            return .removed(draftBody: response.draft?.body)
+        case .failure(let error):
+            return .failed(message: photoErrorText(error))
+        }
+    }
+
+    static func photoErrorText(_ error: Error) -> String {
+        switch error {
+        case BackendError.notSignedIn:
+            return "Deine Anmeldung ist abgelaufen. Das Foto ist noch nicht gelöscht. Bitte melde dich erneut an."
+        case BackendError.server(status: 404):
+            return "Der Server kennt diese Meldung nicht (mehr). Ich kann das Foto dort nicht löschen."
+        case let error as URLError where [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost].contains(error.code):
+            return "Keine Verbindung zum Server. Das Foto ist noch nicht gelöscht. Bitte versuche es noch einmal."
+        default:
+            return "Das Foto konnte nicht gelöscht werden. Es ist noch da. Bitte versuche es noch einmal."
+        }
+    }
+
+    static let noReportToRelease = "Diese Meldung stammt aus einer älteren Version der App und kann nicht freigegeben werden. Bitte melde den Mangel noch einmal."
+
+    /// What the chat shows after the user tapped "Freigeben". On success the status line, the sentence and the button for the
+    /// dashboard. On failure an honest sentence: the report is not released, and the draft stays so the user can try again.
+    static func releaseContents(for result: Result<ReportResponse, Error>) -> [ChatContent] {
+        switch result {
+        case .success(let response):
+            var sentence = "Deine Meldung ist jetzt im Dashboard sichtbar."
+            if let votes = response.caseInfo?.votes, votes > 1 {
+                sentence += " Sie zählt als Stimme \(votes) für dieses Problem."
+            }
+            // An older server answers 200 without `approved`: then nothing was stored, do not claim it
+            if response.approved == false {
+                return [.text("Der Server hat die Freigabe nicht gespeichert. Bitte versuche es erneut.")]
+            }
+            return [.status("Meldung freigegeben"), .text(sentence), .dashboardLink(caseID: response.caseInfo?.caseId)]
+        case .failure(let error):
+            return [.text(releaseErrorText(error))]
+        }
+    }
+
+    static func releaseErrorText(_ error: Error) -> String {
+        switch error {
+        case BackendError.notSignedIn:
+            return "Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an und gib die Meldung dann frei."
+        case BackendError.server(status: 409):
+            return "Diese Meldung kann noch nicht freigegeben werden, weil sie noch nicht eingeordnet ist. Bitte warte einen Moment und versuche es erneut."
+        case BackendError.server(status: 404):
+            return "Der Server kennt diese Meldung nicht (mehr). Bitte melde den Mangel noch einmal."
+        case let error as URLError where [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost].contains(error.code):
+            return "Keine Verbindung zum Server. Die Meldung ist noch nicht freigegeben. Bitte versuche es noch einmal."
+        default:
+            return "Die Meldung konnte nicht freigegeben werden. Sie ist noch nicht im Dashboard. Bitte versuche es noch einmal."
         }
     }
 
@@ -270,6 +386,8 @@ struct BackendReportService: ReportService {
             let sure = classification.isUnsure ? ", unsicher" : ""
             emit(.status("Kategorie: \(classification.categoryName) (\(Int((classification.confidence * 100).rounded())) %\(sure)), \(classification.laneName)"))
         }
+        // The same defect was reported before: this report is one more vote, the user should see that it was not lost
+        if let message = response.caseInfo?.message { emit(.text(message)) }
         emit(.text(authorityText(response.research)))
         if let draft = response.draft {
             emit(.draft(ReportDraft(
@@ -280,9 +398,11 @@ struct BackendReportService: ReportService {
                 recipient: draft.contact.map { "\($0.kindName): \($0.target)" },
                 language: draft.language,
                 summaryDE: draft.summaryDe,
-                photo: image
+                photo: image,
+                reportID: response.id,
+                caseID: response.caseInfo?.caseId
             )))
-            emit(.text("Prüfe den Entwurf. Stimmen Stelle und Text, gib ihn frei."))
+            emit(.text("Prüfe den Entwurf. Stimmen Stelle und Text, gib ihn frei, dann erscheint die Meldung im Dashboard."))
         } else {
             emit(.text("Ich konnte keinen Entwurf schreiben. Bitte versuche es später noch einmal."))
         }

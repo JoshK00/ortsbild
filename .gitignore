@@ -16,3 +16,12 @@ backend/THIRD_PARTY_NOTICES.md
 backend/eval/*
 !backend/eval/README.md
 !backend/eval/classification_cases.jsonl
+
+# The map file of the dashboard (hundreds of MB, made with pmtiles extract, see docs/dashboard-plan.md)
+tiles/
+*.pmtiles
+
+# Private model weights (downloaded by hand, never committed)
+backend/models-private/
+*.jit
+

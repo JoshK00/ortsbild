@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -68,6 +69,22 @@ def merge_overlapping(
         for box in kept
         if not any(_area(big) > _area(box) and _inside_share(box, big) >= inside_share for big in big_and_sure)
     ]
+
+
+DEFAULT_FACE_SCORE_THRESHOLD = 0.7  # decided 2026-11-11 after looking at test photos (docs/mvp-plan.md): the faces a person can recognise score 0.85 or more
+
+
+def face_score_threshold_from_env() -> float:
+    """The score from which a box counts as a face: `FACE_SCORE_THRESHOLD`, default 0.7.
+
+    Lower finds more weak faces and more false boxes (a patch on the road, a leg), higher the other way round. A value outside
+    0.1 to 0.95 stops the start of the server, so a typo cannot switch the face cover off by accident.
+    """
+    raw = os.getenv("FACE_SCORE_THRESHOLD", "").strip()
+    value = float(raw) if raw else DEFAULT_FACE_SCORE_THRESHOLD
+    if not 0.1 <= value <= 0.95:
+        raise ValueError("FACE_SCORE_THRESHOLD must be between 0.1 and 0.95")
+    return value
 
 
 YUNET_MODEL_PATH = Path(__file__).resolve().parent.parent / "assets" / "face_detection_yunet_2023mar.onnx"

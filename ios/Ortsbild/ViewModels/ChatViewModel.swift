@@ -29,8 +29,7 @@ final class ChatViewModel {
         messages = store.loadMessages(for: ticketID) ?? [
             ChatMessage(
                 sender: .agent,
-                // TODO: Show these photo tips as an overlay in the camera view too, and warn before the upload if faces are visible (Apple Vision)
-                content: .text("Hallo! Mach ein Foto vom Mangel oder lade eins hoch. Um den Rest kümmere ich mich.\n\nTipp für das Foto: Bitte halte Personen und Kennzeichen aus dem Bild heraus und nimm den Mangel aus der Nähe auf.")
+                content: .text("Hallo! Mach ein Foto vom Mangel oder lade eins hoch. Um den Rest kümmere ich mich.")
             )
         ]
     }
@@ -86,7 +85,100 @@ final class ChatViewModel {
 
     func perform(_ action: DraftAction) {
         append(.user, .text(Self.title(for: action)))
-        run(service.perform(action))
+        if action == .delete {
+            deleteReport()
+        } else {
+            run(service.perform(action, reportID: lastDraft?.draft.reportID))
+        }
+    }
+
+    /// The user confirmed that the report is to be deleted. The server deletes it with its photo for good, then the card is marked as
+    /// deleted, its photo goes out of the draft, the proof card and the history on the phone, and its buttons stop working. If the
+    /// server cannot delete it, nothing changes and the chat says so. The user can try again.
+    private func deleteReport() {
+        guard let (draftID, draft) = lastDraft, !draft.isDeleted else { return }
+        activity = "Die Meldung wird gelöscht"
+        processingSince = Date()
+        isProcessing = true
+        Task {
+            switch await service.deleteReport(reportID: draft.reportID) {
+            case .deleted:
+                messages = messages.map { message in
+                    switch message.content {
+                    case .draft where message.id == draftID:
+                        ChatMessage(id: message.id, sender: message.sender, content: .draft(draft.deleted()), date: message.date)
+                    case .sanitized(let result):
+                        ChatMessage(id: message.id, sender: message.sender, content: .sanitized(result.withoutPhoto()), date: message.date)
+                    default:
+                        message
+                    }
+                }
+                append(.agent, .text(Self.reportDeletedText))
+            case .failed(let text):
+                append(.agent, .text(text))
+            }
+            isProcessing = false
+        }
+    }
+
+    static let reportDeletedText = "Die Meldung wurde gelöscht."
+
+    /// Whether the photo of a draft can be taken away now: only the newest draft, only if it has a photo, and not while the app
+    /// is working. It works after the release too, so the user can still take a photo out of the dashboard.
+    func canRemovePhoto(_ message: ChatMessage) -> Bool {
+        guard !isProcessing, case .draft(let draft) = message.content else { return false }
+        return draft.photo != nil && lastDraft?.id == message.id
+    }
+
+    /// The user took the photo away because a face or a plate can still be seen. The server deletes it, then the photo is taken out
+    /// of the draft, out of the proof card and out of the history on the phone. If the server cannot delete it, the photo stays and
+    /// the chat says so.
+    func removePhoto() {
+        guard let (draftID, draft) = lastDraft, draft.photo != nil, !isProcessing else { return }
+        activity = "Das Foto wird gelöscht"
+        processingSince = Date()
+        isProcessing = true
+        Task {
+            let result = await service.removePhoto(reportID: draft.reportID)
+            switch result {
+            case .removed(let body):
+                messages = messages.map { message in
+                    switch message.content {
+                    case .draft where message.id == draftID:
+                        ChatMessage(id: message.id, sender: message.sender, content: .draft(draft.withoutPhoto(body: body)), date: message.date)
+                    case .sanitized(let result):
+                        ChatMessage(id: message.id, sender: message.sender, content: .sanitized(result.withoutPhoto()), date: message.date)
+                    default:
+                        message
+                    }
+                }
+                append(.agent, .text(Self.photoRemovedText))
+            case .failed(let text):
+                append(.agent, .text(text))
+            }
+            isProcessing = false
+        }
+    }
+
+    static let photoRemovedText = "Das Foto ist gelöscht. Die Meldung bleibt ohne Foto bestehen."
+
+    /// The newest draft in the chat: the one the actions are about.
+    private var lastDraft: (id: UUID, draft: ReportDraft)? {
+        for message in messages.reversed() {
+            if case .draft(let draft) = message.content { return (message.id, draft) }
+        }
+        return nil
+    }
+
+    /// Whether the buttons of a message work. A question is open as long as it is the last message. A draft stays open until
+    /// it is released (`.dashboardLink` after it) or deleted, also after an error text or a "comes later" text, so the user can try again.
+    func isActive(_ message: ChatMessage) -> Bool {
+        guard !isProcessing else { return false }
+        if case .draft(let draft) = message.content {
+            guard !draft.isDeleted, lastDraft?.id == message.id, let position = messages.firstIndex(where: { $0.id == message.id }) else { return false }
+            return !messages[(position + 1)...].contains { if case .dashboardLink = $0.content { true } else { false } }
+        }
+        return message.id == messages.last?.id
     }
 
     private func append(_ sender: MessageSender, _ content: ChatContent) {
@@ -117,8 +209,7 @@ final class ChatViewModel {
         switch action {
         case .approve: "Freigeben"
         case .revise: "Überarbeiten"
-        case .wrongAuthority: "Falsche Stelle"
-        case .close: "Schließen"
+        case .delete: "Löschen"
         }
     }
 }

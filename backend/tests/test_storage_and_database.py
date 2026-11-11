@@ -268,3 +268,32 @@ def test_postgres_start_answer_is_one_statement_that_only_matches_a_waiting_repo
     assert "status = 'needs_input'" in log[0][0] and "returning id" in log[0][0]
     assert "answer_count < %s" in log[0][0] and log[0][1] == ("a" * 32, 3)  # at most three answers
     assert PostgresReportStatusStore("dsn", fake_connect([], [[]])).start_answer("a" * 32) is False
+
+
+def test_postgres_status_store_releases_a_report_once_and_only_one_with_a_category():
+    log = []
+    assert PostgresReportStatusStore("dsn", fake_connect(log, [[("a" * 32,)]])).approve("a" * 32) is True
+    sql, params = log[0]
+    assert "approved_at = coalesce(approved_at, now())" in sql  # the first release time stays
+    assert params == ("a" * 32, ["classified", "researched", "drafted"])
+    assert PostgresReportStatusStore("dsn", fake_connect([], [[]])).approve("a" * 32) is False
+
+
+def test_postgres_status_store_lists_only_released_reports_for_the_dashboard():
+    from datetime import datetime, timezone
+
+    log = []
+    row = ("a" * 32, "key-1", "drafted", None, {"photos": []}, {"category": "pothole"}, None, None, datetime(2026, 11, 10, tzinfo=timezone.utc), datetime(2026, 11, 9, tzinfo=timezone.utc))
+    [(record, created_at)] = PostgresReportStatusStore("dsn", fake_connect(log, [[row]])).list_visible(["abcdef123456"], 10)
+    assert "approved_at is not null" in log[0][0]
+    assert record.approved_at is not None and created_at.day == 9
+
+
+def test_postgres_status_store_deletes_one_report_of_a_user_and_returns_it():
+    log = []
+    row = ("a" * 32, "key-1", "drafted", None, {"photos": []}, None, None, None, None)
+    record = PostgresReportStatusStore("dsn", fake_connect(log, [[row]])).delete_report("a" * 32, "key-1")
+    sql, params = log[0]
+    assert "delete from reports where id = %s and user_key = %s" in sql  # only the owner's report
+    assert params == ("a" * 32, "key-1") and record.sanitized == {"photos": []}
+    assert PostgresReportStatusStore("dsn", fake_connect([], [[]])).delete_report("a" * 32, "key-1") is None

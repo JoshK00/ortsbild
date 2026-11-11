@@ -23,6 +23,7 @@ struct TicketListView: View {
                     list
                 }
             }
+            .background { AppBackground() }
             .navigationTitle("Meldungen")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -52,12 +53,16 @@ struct TicketListView: View {
                 NavigationLink(value: ticket.id) {
                     TicketRow(ticket: ticket)
                 }
+                .listRowBackground(Color.clear.glassCard(cornerRadius: 22).padding(.vertical, 4))
+                .listRowSeparator(.hidden)
             }
             .onDelete { offsets in
                 let ids = offsets.map { store.tickets[$0].id }
                 ids.forEach(store.delete)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background { AppBackground() }
     }
 
     private var emptyState: some View {
@@ -67,7 +72,7 @@ struct TicketListView: View {
             Text("Für jedes Problem gibt es eine eigene Meldung mit eigenem Verlauf. Der Verlauf bleibt nur auf diesem iPhone.")
         } actions: {
             Button("Neue Meldung", action: newReport)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButtonStyle())
         }
     }
 

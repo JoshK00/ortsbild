@@ -274,3 +274,30 @@ def test_a_small_face_next_to_a_big_one_stays():
 def test_yunet_finds_a_huge_blank_photo_without_error():
     """A very big image runs through the scaled down copies and the tiles without error."""
     assert YuNetFaceDetector().detect(Image.new("RGB", (3974, 5000), (200, 200, 200))) == []
+
+
+# ---------------------------------------------------------------------------
+# The score threshold of the face detector (FACE_SCORE_THRESHOLD)
+# ---------------------------------------------------------------------------
+
+
+def test_the_face_threshold_is_0_7_unless_the_environment_says_otherwise(monkeypatch):
+    from privacy.image_detectors import face_score_threshold_from_env
+
+    monkeypatch.delenv("FACE_SCORE_THRESHOLD", raising=False)
+    assert face_score_threshold_from_env() == 0.7
+    monkeypatch.setenv("FACE_SCORE_THRESHOLD", "0.8")
+    assert face_score_threshold_from_env() == 0.8
+    monkeypatch.setenv("FACE_SCORE_THRESHOLD", "  ")
+    assert face_score_threshold_from_env() == 0.7
+
+
+def test_a_threshold_that_would_switch_the_face_cover_off_stops_the_start(monkeypatch):
+    import pytest
+
+    from privacy.image_detectors import face_score_threshold_from_env
+
+    for bad in ("0", "0.05", "0.99", "1", "-1", "abc"):
+        monkeypatch.setenv("FACE_SCORE_THRESHOLD", bad)
+        with pytest.raises(ValueError):
+            face_score_threshold_from_env()

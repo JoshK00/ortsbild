@@ -23,13 +23,14 @@ actor BackendClient {
     private let store: SessionStore
     private var refreshTask: Task<Session, Error>?
 
-    init(baseURL: URL, store: SessionStore = SessionStore()) {
+    /// `urlSession` is for tests (a stub that answers without a network), the app uses the default.
+    init(baseURL: URL, store: SessionStore = SessionStore(), urlSession: URLSession? = nil) {
         self.baseURL = baseURL
         self.store = store
         let configuration = URLSessionConfiguration.default
         // The server computes on the photo (faces, text), that takes a while on the small machine.
         configuration.timeoutIntervalForRequest = 120
-        self.urlSession = URLSession(configuration: configuration)
+        self.urlSession = urlSession ?? URLSession(configuration: configuration)
     }
 
     // MARK: Session
@@ -106,6 +107,29 @@ actor BackendClient {
         let (data, response) = try await authorized(path: "/v1/reports/\(reportID)/answer", method: "POST", body: body, contentType: "application/json")
         guard response.statusCode == 200 else { throw BackendError.server(status: response.statusCode) }
         return try JSONDecoder().decode(ReportResponse.self, from: data)
+    }
+
+    /// The user releases the report: from now on it is visible in the dashboard and counts as a vote. Safe to send twice.
+    /// 409 means the report has no category yet, 404 that the server does not know it (or it belongs to somebody else).
+    func approve(reportID: String) async throws -> ReportResponse {
+        let (data, response) = try await authorized(path: "/v1/reports/\(reportID)/approve", method: "POST")
+        guard response.statusCode == 200 else { throw BackendError.server(status: response.statusCode) }
+        return try JSONDecoder().decode(ReportResponse.self, from: data)
+    }
+
+    /// The user removes the photo of the report: the server deletes the raw and the cleaned file for good. The answer is the
+    /// report without the photo (`photo_urls` is empty). Safe to send twice. 404: the server does not know the report.
+    func deletePhoto(reportID: String) async throws -> ReportResponse {
+        let (data, response) = try await authorized(path: "/v1/reports/\(reportID)/photo", method: "DELETE")
+        guard response.statusCode == 200 else { throw BackendError.server(status: response.statusCode) }
+        return try JSONDecoder().decode(ReportResponse.self, from: data)
+    }
+
+    /// The user deletes the report: the server deletes it and its photo for good and answers 204 without a body.
+    /// 404: the server does not know the report (any more), 503: a file could not be deleted and the report is still there.
+    func deleteReport(reportID: String) async throws {
+        let (_, response) = try await authorized(path: "/v1/reports/\(reportID)", method: "DELETE")
+        guard response.statusCode == 204 else { throw BackendError.server(status: response.statusCode) }
     }
 
     /// The sanitized photo. `path` is what the server returned in `photo_urls`.

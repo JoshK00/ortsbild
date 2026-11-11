@@ -22,10 +22,39 @@ nonisolated struct ReportResponse: Decodable, Sendable {
     let draft: DraftDTO?
     /// Set if the picture could not be assigned and the user is asked. Nothing is researched or drafted until they answer.
     let clarification: ClarificationDTO?
+    /// Says whether the same defect was reported before and how many votes it has. `nil` while the report has no category.
+    let caseInfo: CaseDTO?
+    /// `true` once the user released the report for the dashboard. Missing on an older server, then `isApproved` is false.
+    let approved: Bool?
+
+    var isApproved: Bool { approved ?? false }
 
     enum CodingKeys: String, CodingKey {
-        case id, status, reason, report, classification, research, draft, clarification
+        case id, status, reason, report, classification, research, draft, clarification, approved
         case photoUrls = "photo_urls"
+        case caseInfo = "case"
+    }
+}
+
+/// The case of a report: the same category within 40 m counts as the same defect, every released report is one vote.
+nonisolated struct CaseDTO: Decodable, Sendable, Equatable {
+    /// How many released reports the case has, this one included (it counts once the user releases it).
+    let votes: Int
+    /// `true` if another released report of the case came first.
+    let isDuplicate: Bool
+    /// The id the dashboard knows the case by (deep link `#case=<id>`). `nil` from an older server.
+    var caseId: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case votes
+        case isDuplicate = "is_duplicate"
+        case caseId = "case_id"
+    }
+
+    /// The sentence for the chat, or `nil` if there is nothing to say (the first report of a defect).
+    var message: String? {
+        guard isDuplicate, votes > 1 else { return nil }
+        return "Dieses Problem wurde hier schon gemeldet. Mit deiner Freigabe zählt deine Meldung als weitere Stimme (dann \(votes))."
     }
 }
 
@@ -135,6 +164,11 @@ struct SanitizedResult {
         self.text = text
         self.photo = photo
         self.changes = changes
+    }
+
+    /// The same result without the photo, after the user took the photo away.
+    func withoutPhoto() -> SanitizedResult {
+        SanitizedResult(text: text, photo: nil, changes: changes)
     }
 
     nonisolated private static func describe(_ entry: RedactionEntryDTO) -> String? {

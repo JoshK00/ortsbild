@@ -3,7 +3,6 @@ import logging
 from classification.models import Classification
 from drafting.models import Draft, DraftInput
 from drafting.provider import DraftProvider
-from models.incoming_report import Place
 from models.sanitized_report import SanitizedReport
 from privacy.retry import retry
 from research.models import ResearchResult
@@ -13,27 +12,15 @@ logger = logging.getLogger("ortsbild.drafting")
 DEFAULT_LANGUAGE = "de"  # the language of the app, used when no authority and no language was found
 
 
-def address_line(place: Place | None) -> str:
-    """The address as one line, from the parts the phone found. Empty if the phone found nothing."""
-    if place is None:
-        return ""
-    street = " ".join(part for part in (place.street, place.house_number) if part)
-    town = " ".join(part for part in (place.postal_code, place.municipality) if part)
-    return ", ".join(part for part in (street, town, (place.country_code or "").upper()) if part)
+# The lines that older drafts carry under the letter (location, map link, attachment). New drafts do not get them any more
+# (decision of the team 2026-11-11: the address and the photo are shown by the dashboard), old ones are cleaned when they are read.
+_LEGACY_FACT_PREFIXES = ("Standort / Location:", "https://www.openstreetmap.org/?mlat=", "Anhang / Attachment:")
 
 
-def facts_block(report: SanitizedReport) -> str:
-    """The location and the attachment, written by our code and not by the model, so they are exactly what the phone found.
-
-    The labels have both languages, so the block fits a letter in any language.
-    """
-    lat, lon = report.location.lat, report.location.lon
-    address = address_line(report.location.place)
-    lines = [f"Standort / Location: {address + ' | ' if address else ''}{lat:.5f}, {lon:.5f}"]
-    lines.append(f"https://www.openstreetmap.org/?mlat={lat:.5f}&mlon={lon:.5f}#map=19/{lat:.5f}/{lon:.5f}")
-    if report.photos:
-        lines.append("Anhang / Attachment: Foto / photo")
-    return "\n".join(lines)
+def strip_facts_block(body: str) -> str:
+    """The letter without the lines of the old facts block (location, map link, attachment) and without the blank lines it leaves."""
+    lines = [line for line in body.split("\n") if not line.startswith(_LEGACY_FACT_PREFIXES)]
+    return "\n".join(lines).rstrip()
 
 
 class Drafter:
@@ -57,7 +44,7 @@ class Drafter:
             )
             content = retry(lambda: self.provider.draft(data), "draft", attempts=2)
             return Draft(
-                subject=content.subject.strip(), body=f"{content.body.strip()}\n\n{facts_block(report)}",
+                subject=content.subject.strip(), body=content.body.strip(),
                 summary_de=content.summary_de.strip(), language=language,
                 authority=research.authority if research else None, contact=research.channel if research else None,
             )

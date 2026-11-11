@@ -40,7 +40,7 @@ struct SanitizedCard: View {
                 }
             }
             .padding(14)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .glassCard(cornerRadius: 22)
             Spacer(minLength: 24)
         }
     }

@@ -4,16 +4,33 @@ import os
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Header
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.health import CheckResult, model_checks, run_checks
 from api.auth import create_auth_router, make_current_user
+from api.public import create_public_router
 from api.reports import Services, create_reports_router
 from logging_config import setup_logging
 
 logger = logging.getLogger("ortsbild.api")
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Static files that the browser must ask about every time (`no-cache` is not "do not store": it keeps the file but checks the
+    ETag first, so an unchanged file costs one small answer). Without it a browser (or the web view of the app) may keep an old
+    stylesheet next to a new script after a deploy, and the dashboard breaks."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
+DEFAULT_TILES_DIR = Path(__file__).resolve().parent.parent.parent / "tiles"  # next to the backend folder, not in it
 
 
 def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
@@ -34,7 +51,7 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
     from research.provider import provider_from_env as research_provider_from_env
     from research.service import Researcher
     from privacy.graph import build_privacy_graph, default_detectors
-    from privacy.image_detectors import YuNetFaceDetector
+    from privacy.image_detectors import YuNetFaceDetector, face_score_threshold_from_env
     from privacy.image_text import RapidOcrEngine
     from privacy.photo_sanitize import ImageOptions
     from privacy.photo_store import s3_store_from_env
@@ -42,8 +59,8 @@ def build_production() -> tuple[Services, dict[str, Callable[[], None]]]:
 
     load_dotenv()
     detectors = default_detectors()
-    # Lower = fewer missed faces but more false boxes. Tune it with FACE_SCORE_THRESHOLD in .env.prod.
-    face_detector = YuNetFaceDetector(score_threshold=float(os.getenv("FACE_SCORE_THRESHOLD", "0.3")))
+    # Lower = fewer missed faces but more false boxes. Default 0.7, tune it with FACE_SCORE_THRESHOLD in .env.prod.
+    face_detector = YuNetFaceDetector(score_threshold=face_score_threshold_from_env())
     options = ImageOptions(max_faces=int(os.getenv("MAX_FACES", "10")))
     ocr_engine = RapidOcrEngine() if options.text_in_image else None
     photo_store = s3_store_from_env()
@@ -87,11 +104,17 @@ def create_app(
     api_key: str | None = None,
     configure_logging: bool = True,
     reports_per_hour: int | None = None,
+    demo_reporters: list[str] | None = None,
+    tiles_dir: Path | None = None,
 ) -> FastAPI:
     """Create the API. Without arguments it builds the real parts at startup.
 
     Tests pass their own checks and services and switch the logging setup off.
     The API key only opens the details of /health, the app signs in with Apple instead.
+    `demo_reporters` are the reporter ids whose reports the dashboard shows (without login). Without it the environment
+    variable DEMO_REPORTER_IDS is used, a comma separated list. Empty means the dashboard has nothing to show.
+    `tiles_dir` holds the map file of the dashboard (`*.pmtiles`), without it the environment variable TILES_DIR or the folder
+    `tiles` next to `backend` is used. A folder that does not exist is simply not served.
     """
 
     @asynccontextmanager
@@ -148,4 +171,21 @@ def create_app(
             tenant=os.getenv("TENANT_ID", "pilot"),
         )
     )
+
+    def current_demo_reporters() -> list[str]:
+        if demo_reporters is not None:
+            return demo_reporters
+        return os.getenv("DEMO_REPORTER_IDS", "").split(",")
+
+    app.include_router(create_public_router(lambda: app.state.services, current_demo_reporters))
+
+    # The page of the dashboard. It lives next to the API, so no CORS is needed. TODO: it is public, add the headers of a
+    # public page (CSP is set in the page itself) when the dashboard shows more than the team's test reports.
+    if DASHBOARD_DIR.is_dir():
+        app.mount("/dashboard", RevalidatingStaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard")
+    # The map of the dashboard is one big file that the browser reads piece by piece (HTTP range requests). It is ours, so
+    # no visitor has to ask a third party for a map. There is no listing of the folder, a file is found only by its name.
+    tiles = tiles_dir or Path(os.getenv("TILES_DIR", DEFAULT_TILES_DIR))
+    if tiles.is_dir():
+        app.mount("/tiles", StaticFiles(directory=tiles), name="tiles")
     return app

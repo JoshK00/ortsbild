@@ -10,7 +10,7 @@ from models.incoming_report import IncomingReport, Photo
 from models.sanitized_report import RedactionEntry, SanitizedReport
 from privacy.assemble import assemble_report
 from privacy.detectors import Gliner2Detector, PatternDetector, TextDetector
-from privacy.image_detectors import FaceDetector, YuNetFaceDetector
+from privacy.image_detectors import FaceDetector, YuNetFaceDetector, face_score_threshold_from_env
 from privacy.image_text import OcrEngine, RapidOcrEngine
 from privacy.photo_sanitize import ImageOptions, sanitize_photos
 from privacy.photo_store import PhotoStore, s3_store_from_env
@@ -231,7 +231,7 @@ def build_privacy_graph(
     if pseudonym_store is None:
         pseudonym_store = postgres_pseudonym_store_from_env()
     if face_detector is None:
-        face_detector = YuNetFaceDetector()
+        face_detector = YuNetFaceDetector(score_threshold=face_score_threshold_from_env())
     if image_options is None:
         image_options = ImageOptions()
     if ocr_engine is None and image_options.text_in_image:

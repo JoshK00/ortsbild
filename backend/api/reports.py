@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -14,9 +14,10 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 import privacy.photos  # noqa: F401  (registers the HEIC reader of Pillow)
-from auth.account import delete_account
+from auth.account import delete_account, photo_refs
 from auth.sessions import AuthManager
 from auth.tokens import AccessClaims
+from cases import CASE_OPEN_DAYS, DUPLICATE_RADIUS_M, case_for, case_id_of, votes_of
 from classification.models import CLARIFICATION_CATEGORIES, Classification
 from models.incoming_report import IncomingReport
 from models.sanitized_report import RedactionLog, SanitizedReport
@@ -24,6 +25,7 @@ from privacy.photo_store import PhotoStore
 from privacy.pseudonyms import PseudonymStore
 from privacy.detectors import TextDetector
 from privacy.report_status import ReportRecord, ReportStatusStore
+from drafting.service import strip_facts_block
 from privacy.text import sanitize_text
 
 logger = logging.getLogger("ortsbild.api")
@@ -85,24 +87,27 @@ def is_not_found(error: Exception) -> bool:
     return isinstance(response, dict) and response.get("Error", {}).get("Code") in ("NoSuchKey", "404")
 
 
-def report_payload(record: ReportRecord) -> dict:
+def report_payload(record: ReportRecord, case: dict | None = None) -> dict:
     """What the app gets for a report: sanitized (with the result), blocked, rejected or still processing.
 
     `status` is the outcome of the privacy layer. `classification` is the object of the classification, or null
     if it does not exist (yet). A blocked report gets no reason (it is in the log and the status table).
-    A rejected one gets a short code.
+    A rejected one gets a short code. `case` says whether the report is a duplicate and how many votes its case has
+    (see `case_info`), null while the report has no category. `approved` says whether the user released the report (it is
+    visible in the dashboard then).
     """
     empty = {
         "id": record.report_id, "report": None, "photo_urls": [], "classification": None, "research": None, "draft": None,
-        "clarification": None,
+        "clarification": None, "case": None, "approved": False,
     }
     if record.status in ("sanitized", "classified", "needs_input", "researched", "drafted") and record.sanitized is not None:
         photos = record.sanitized.get("photos", [])
         urls = [f"/v1/reports/{record.report_id}/photos/{photo['id']}" for photo in photos]
         return {
             "id": record.report_id, "status": "sanitized", "report": record.sanitized,
-            "photo_urls": urls, "classification": record.classification, "research": record.research, "draft": record.draft,
-            "clarification": clarification_of(record),
+            "photo_urls": urls, "classification": record.classification, "research": record.research, "draft": clean_draft(record.draft),
+            "clarification": clarification_of(record), "case": case,
+            "approved": record.approved_at is not None,
         }
     if record.status == "blocked_privacy":
         return {**empty, "status": "blocked"}
@@ -111,12 +116,50 @@ def report_payload(record: ReportRecord) -> dict:
     return {**empty, "status": "processing"}
 
 
+def clean_draft(draft: dict | None) -> dict | None:
+    """The draft without the facts block that drafts of the first versions carry (see `strip_facts_block`)."""
+    if not draft or not isinstance(draft.get("body"), str):
+        return draft
+    return {**draft, "body": strip_facts_block(draft["body"])}
+
+
 def clarification_of(record: ReportRecord) -> dict | None:
     """The open question for the user, or None. `reason` says why the picture could not be assigned, `options` is what can be picked."""
     if record.status != "needs_input":
         return None
     unknown = (record.classification or {}).get("category") == "other"
     return {"reason": "no_defect" if unknown else "unclear", "options": list(CLARIFICATION_CATEGORIES)}
+
+
+def case_info(services: Services, record: ReportRecord) -> dict | None:
+    """Is this report a duplicate, and how many votes has its case? None while the report has no category or no position.
+
+    A vote is a RELEASED report (the dashboard shows only those). The report itself is counted even before the user releases it,
+    so the number is what the case will have after the release. Only the counts, the time of the first report and the public id
+    of the case leave here, nothing of another user's report. The reports of everybody count, so the user sees "this was
+    reported before" even when somebody else did it.
+    """
+    category = (record.classification or {}).get("category")
+    location = ((record.sanitized or {}).get("location")) or {}
+    if category is None or not isinstance(location.get("lat"), (int, float)) or not isinstance(location.get("lon"), (int, float)):
+        return None
+    try:
+        # twice the open time: the anchor of a case may be older than the report by up to that
+        since = datetime.now(timezone.utc) - timedelta(days=2 * CASE_OPEN_DAYS)
+        entries = services.status_store.list_nearby(category, location["lat"], location["lon"], 2 * DUPLICATE_RADIUS_M, since)
+        entries = [entry for entry in entries if entry[0].approved_at is not None or entry[0].report_id == record.report_id]
+        case = case_for(entries, record)
+    except Exception as error:  # the answer to the user must not fail because of the duplicate check
+        logger.error("duplicate check failed: report_id=%s error=%s", record.report_id, type(error).__name__)
+        return None
+    if not case:
+        return None
+    return {
+        "votes": votes_of(case),
+        "is_duplicate": case[0][0].report_id != record.report_id,
+        "first_reported_at": case[0][1].isoformat(),
+        "case_id": case_id_of(case[0][0].report_id),  # the id the dashboard knows, to open the case there
+    }
 
 
 class AnswerBody(BaseModel):
@@ -157,6 +200,9 @@ def create_reports_router(
             raise HTTPException(404, "no such report")  # the same answer for a foreign report, so ids cannot be probed
         return record
 
+    def payload_of(record: ReportRecord) -> dict:
+        return report_payload(record, case_info(get_services(), record))
+
     @router.post("/reports")
     def create_report(
         client_report_id: str = Form(..., min_length=8, max_length=64, pattern=r"^[A-Za-z0-9-]+$"),
@@ -194,7 +240,7 @@ def create_reports_router(
         report_id = uuid.uuid4().hex
         owner_of_id = services.status_store.claim(report_id, user.user_key, client_report_id, "app", tenant)
         if owner_of_id != report_id:  # a retry: answer with the first result, do the work only once
-            return JSONResponse(report_payload(own_report(owner_of_id, user)))
+            return JSONResponse(payload_of(own_report(owner_of_id, user)))
 
         photos = []
         if image:
@@ -223,12 +269,68 @@ def create_reports_router(
             raise HTTPException(422, "the report is not valid")
 
         services.graph.invoke({"report": report})
-        return JSONResponse(report_payload(own_report(report_id, user)))
+        return JSONResponse(payload_of(own_report(report_id, user)))
 
     @router.get("/reports/{report_id}")
     def get_report(report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)) -> JSONResponse:
         """The status and, when it is ready, the sanitized result of one of your reports."""
-        return JSONResponse(report_payload(own_report(report_id, user)))
+        return JSONResponse(payload_of(own_report(report_id, user)))
+
+    @router.post("/reports/{report_id}/approve")
+    def approve_report(report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)) -> JSONResponse:
+        """The user releases the report: it is visible in the dashboard from now on and counts as a vote of its case.
+
+        The dashboard replaces the letters to the authorities (docs/documentation.md, 2026-11-10). Releasing twice is fine. A report
+        that has no category yet (still processing, waiting for the answer to a question, blocked or rejected) gets 409.
+        """
+        own_report(report_id, user)  # 404 for a foreign report
+        if not get_services().status_store.approve(report_id):
+            raise HTTPException(409, "the report cannot be released yet")
+        return JSONResponse(payload_of(own_report(report_id, user)))
+
+    @router.delete("/reports/{report_id}", status_code=204)
+    def delete_report(report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)) -> Response:
+        """The user deletes the report for good: its photo files first, then the report itself (text, place, draft, release).
+
+        It works at any time, also after the release (the dashboard then no longer lists it, its answer may be 30 seconds old).
+        A file that cannot be deleted gives 503 and the report stays, so the user is never told it is gone when it is not.
+        Another user's or an unknown report gets 404. Deleting twice gets 404 the second time, the app counts that as gone.
+        """
+        services = get_services()
+        record = own_report(report_id, user)
+        for ref in photo_refs(record):
+            try:
+                services.photo_store.delete(ref)
+            except Exception as error:
+                if is_not_found(error):
+                    continue
+                logger.error("report not deleted, photo stays: report_id=%s error=%s", report_id, type(error).__name__)
+                raise HTTPException(503, "the report could not be deleted, try again") from None
+        services.status_store.delete_report(report_id, user.user_key)
+        return Response(status_code=204)
+
+    @router.delete("/reports/{report_id}/photo")
+    def delete_photo(report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)) -> JSONResponse:
+        """The user removes the photo of the report, for good: the cleaned file is deleted (and the raw one, if it is still there), the report stays without it.
+
+        This is the last safety net of the privacy layer. The user looks at the cleaned photo before releasing the report, and if a
+        face or a plate is still visible, this removes it. It works at any time, also after the release (the dashboard then
+        shows the placeholder). Doing it twice is fine.
+        A file that cannot be deleted gives 503 and the photo stays in the report, so the user knows it is not gone.
+        """
+        services = get_services()
+        record = own_report(report_id, user)
+        for ref in photo_refs(record):
+            try:
+                services.photo_store.delete(ref)
+            except Exception as error:
+                if is_not_found(error):
+                    continue
+                logger.error("photo not deleted: report_id=%s error=%s", report_id, type(error).__name__)
+                raise HTTPException(503, "the photo could not be deleted, try again") from None
+        if record.sanitized is not None and record.sanitized.get("photos"):
+            services.status_store.save_sanitized(report_id, {**record.sanitized, "photos": []})
+        return JSONResponse(payload_of(own_report(report_id, user)))
 
     @router.post("/reports/{report_id}/answer")
     def answer_question(
@@ -272,7 +374,7 @@ def create_reports_router(
             chosen = Classification(category=body.category, lane=asked.lane, emergency=asked.emergency, confidence=1.0)
             services.status_store.save_classification(report_id, chosen.model_dump(mode="json"))
             services.followup_graph.invoke({"sanitized_report": sanitized, "classification": chosen})
-        return JSONResponse(report_payload(own_report(report_id, user)))
+        return JSONResponse(payload_of(own_report(report_id, user)))
 
     @router.get("/reports/{report_id}/photos/{photo_id}")
     def get_photo(

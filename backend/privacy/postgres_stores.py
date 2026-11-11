@@ -1,11 +1,13 @@
+import math
 import os
+from datetime import datetime
 
 import psycopg
 
 from privacy.pseudonyms import hash_identifier, new_pseudonym
 from psycopg.types.json import Jsonb
 
-from privacy.report_status import MAX_ANSWERS, ReportRecord, ReportStatusRow, Status
+from privacy.report_status import CLASSIFIED_STATUSES, MAX_ANSWERS, ReportRecord, ReportStatusRow, Status
 from privacy.retry import retry
 
 
@@ -153,11 +155,23 @@ class PostgresReportStatusStore:
 
         retry(run, "draft save")
 
+    def approve(self, report_id: str) -> bool:
+        def run():
+            with self.connect(self.dsn) as connection:
+                # Only a report that has a category can be released, and the first release time stays
+                return connection.execute(
+                    "update reports set approved_at = coalesce(approved_at, now()), updated_at = now() "
+                    "where id = %s and status = any(%s) returning id",
+                    (report_id, list(CLASSIFIED_STATUSES)),
+                ).fetchone()
+
+        return retry(run, "report approve") is not None
+
     def get(self, report_id: str) -> ReportRecord | None:
         def run():
             with self.connect(self.dsn) as connection:
                 return connection.execute(
-                    "select id, user_key, status, block_reason, sanitized_report, classification, research, draft from reports where id = %s",
+                    "select id, user_key, status, block_reason, sanitized_report, classification, research, draft, approved_at from reports where id = %s",
                     (report_id,),
                 ).fetchone()
 
@@ -180,11 +194,62 @@ class PostgresReportStatusStore:
             with self.connect(self.dsn) as connection:
                 return connection.execute(
                     "delete from reports where user_key = %s "
-                    "returning id, user_key, status, block_reason, sanitized_report, classification, research, draft",
+                    "returning id, user_key, status, block_reason, sanitized_report, classification, research, draft, approved_at",
                     (user_key,),
                 ).fetchall()
 
         return [ReportRecord(*row) for row in retry(run, "report delete")]
+
+    def delete_report(self, report_id: str, user_key: str) -> ReportRecord | None:
+        def run():
+            with self.connect(self.dsn) as connection:
+                return connection.execute(
+                    "delete from reports where id = %s and user_key = %s "
+                    "returning id, user_key, status, block_reason, sanitized_report, classification, research, draft, approved_at",
+                    (report_id, user_key),
+                ).fetchone()
+
+        row = retry(run, "report delete one")
+        return ReportRecord(*row) if row else None
+
+    def list_nearby(
+        self, category: str, lat: float, lon: float, radius_m: float, since: datetime
+    ) -> list[tuple[ReportRecord, datetime]]:
+        d_lat = radius_m / 111_195
+        d_lon = radius_m / (111_195 * max(0.01, math.cos(math.radians(lat))))
+
+        def run():
+            with self.connect(self.dsn) as connection:
+                return connection.execute(
+                    "select id, user_key, status, block_reason, sanitized_report, classification, research, draft, approved_at, created_at "
+                    "from reports where status = any(%s) and classification->>'category' = %s and created_at > %s "
+                    "and (sanitized_report->'location'->>'lat')::double precision between %s and %s "
+                    "and (sanitized_report->'location'->>'lon')::double precision between %s and %s "
+                    "order by created_at limit 500",
+                    (list(CLASSIFIED_STATUSES), category, since, lat - d_lat, lat + d_lat, lon - d_lon, lon + d_lon),
+                ).fetchall()
+
+        return [(ReportRecord(*row[:9]), row[9]) for row in retry(run, "report nearby")]
+
+    def list_visible(self, key_prefixes: list[str] | None, limit: int) -> list[tuple[ReportRecord, datetime]]:
+        if key_prefixes is not None and not key_prefixes:
+            return []
+        columns = "select id, user_key, status, block_reason, sanitized_report, classification, research, draft, approved_at, created_at "
+
+        def run():
+            with self.connect(self.dsn) as connection:
+                if key_prefixes is None:  # every user
+                    return connection.execute(
+                        columns + "from reports where status = any(%s) and approved_at is not null order by created_at desc limit %s",
+                        (list(CLASSIFIED_STATUSES), limit),
+                    ).fetchall()
+                return connection.execute(
+                    columns + "from reports where left(user_key, 12) = any(%s) and status = any(%s) and approved_at is not null "
+                    "order by created_at desc limit %s",
+                    (key_prefixes, list(CLASSIFIED_STATUSES), limit),
+                ).fetchall()
+
+        return [(ReportRecord(*row[:9]), row[9]) for row in retry(run, "report list")]
 
 
 def postgres_pseudonym_store_from_env() -> PostgresPseudonymStore:
