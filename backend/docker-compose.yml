@@ -60,7 +60,7 @@ services:
       - "127.0.0.1:8000:8000"
 
   # The connector gateway: takes new reports in and hands them to the backend (services/gateway/README.md).
-  # It reads the same .env (STORAGE_*, GATEWAY_KEY). Locally there is no Caddy: new reports go to port 8080.
+  # It reads the same .env (STORAGE_*, GATEWAY_KEY). Caddy below routes to it like on the server, port 8080 is the gateway alone.
   gateway:
     build: ../services/gateway
     depends_on:
@@ -71,6 +71,20 @@ services:
       STORAGE_ENDPOINT_URL: http://minio:9000
     ports:
       - "127.0.0.1:8080:8000"
+
+  # The same routing as on the server (deploy/Caddyfile): POST /v1/reports goes to the gateway, everything else to the
+  # backend, /internal is blocked. Use http://localhost:8088 like the server address, or http://caddy inside the network.
+  caddy:
+    image: caddy:2
+    depends_on:
+      - backend
+      - gateway
+    environment:
+      SITE_ADDRESS: ":80"
+    volumes:
+      - ../deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "127.0.0.1:8088:80"
 
 volumes:
   pgdata:

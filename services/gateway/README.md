@@ -52,7 +52,14 @@ cd backend
 docker compose up --build
 ```
 
-The gateway runs on `http://localhost:8080`, the backend on `http://localhost:8000`. Locally there is no Caddy: send new reports to port 8080, everything else to port 8000.
+`http://localhost:8088` is Caddy with the same routing as on the server (new reports to the gateway, everything else to the backend). The gateway alone is on `http://localhost:8080`, the backend alone on `http://localhost:8000`.
+
+A full test through the real API, with Josh's script of test reports (it opens a session for a test user, no Apple login needed):
+
+```powershell
+docker compose exec backend python scripts/seed_stuttgart_reports.py --base http://caddy
+docker compose logs gateway
+```
 
 ## Tests
 
