@@ -1,0 +1,12 @@
+# SITE_ADDRESS comes from the compose file: ":80" for plain HTTP, or a domain for HTTPS.
+{$SITE_ADDRESS::80} {
+	encode gzip
+
+	# Photos are uploaded through here. TODO: lower the limit once the real size is known.
+	request_body {
+		max_size 25MB
+	}
+
+	# TODO: /health shows the names of our checks. Restrict it before real operation.
+	reverse_proxy backend:8000
+}

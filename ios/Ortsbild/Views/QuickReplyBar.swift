@@ -15,8 +15,7 @@ struct QuickReplyBar: View {
         HStack(spacing: 8) {
             ForEach(options, id: \.self) { option in
                 Button(option) { onSelect(option) }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
+                    .buttonStyle(GlassButtonStyle())
                     .disabled(!isEnabled)
             }
             Spacer()

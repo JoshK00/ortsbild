@@ -1,0 +1,64 @@
+# Local stack that mimics the hosting: backend, PostgreSQL and an S3-compatible storage (MinIO).
+# Start: docker compose up --build    (needs backend/.env, see .env.example)
+# TODO: PostGIS image once the duplicate check by location is built.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ortsbild
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-ortsbild-local}
+      POSTGRES_DB: ortsbild
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/postgres:/docker-entrypoint-initdb.d:ro   # runs the SQL files on the first start
+    ports:
+      - "127.0.0.1:5432:5432"   # only reachable from this machine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ortsbild"]
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minio-local}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minio-local-secret}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"   # web console
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 $${MINIO_USER} $${MINIO_PASSWORD}; do sleep 1; done;
+      mc mb --ignore-existing local/$${BUCKET_RAW} local/$${BUCKET_CLEAN}"
+    environment:
+      MINIO_USER: ${STORAGE_ACCESS_KEY:-minio-local}
+      MINIO_PASSWORD: ${STORAGE_SECRET_KEY:-minio-local-secret}
+      BUCKET_RAW: ${STORAGE_BUCKET_RAW:-ortsbild-raw}
+      BUCKET_CLEAN: ${STORAGE_BUCKET_CLEAN:-ortsbild-clean}
+
+  backend:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      # inside the compose network the services are reached by name
+      DATABASE_URL: postgresql://ortsbild:${DATABASE_PASSWORD:-ortsbild-local}@postgres:5432/ortsbild
+      STORAGE_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  pgdata:
+  miniodata:

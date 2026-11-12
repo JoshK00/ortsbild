@@ -11,11 +11,18 @@ struct ComposerBar: View {
     @Binding var text: String
     @Binding var photo: UIImage?
     let canSend: Bool
+    /// The hint in the empty input field, "Nachricht" unless a question waits for the answer.
+    var placeholder: LocalizedStringKey = "Nachricht"
     let onSend: () -> Void
 
     @State private var showCamera = false
     @State private var showLibrary = false
     @State private var pickerItem: PhotosPickerItem?
+    /// The first time, the sheet with the photo rules opens before the camera or the library. `pendingSource` is what the user wanted.
+    @State private var showNotice = false
+    @State private var pendingSource: Source?
+
+    private enum Source { case camera, library }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -26,7 +33,7 @@ struct ComposerBar: View {
             HStack(alignment: .bottom, spacing: 8) {
                 attachMenu
 
-                TextField("Nachricht", text: $text, axis: .vertical)
+                TextField(placeholder, text: $text, axis: .vertical)
                     .lineLimit(1...4)
                     .padding(.vertical, 8)
 
@@ -43,6 +50,9 @@ struct ComposerBar: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 26))
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
+        .sheet(isPresented: $showNotice, onDismiss: openPendingSource) {
+            PhotoNoticeSheet()
+        }
         .photosPicker(isPresented: $showLibrary, selection: $pickerItem, matching: .images)
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { photo = $0 }
@@ -61,18 +71,39 @@ struct ComposerBar: View {
         }
     }
 
+    /// Opens the source at once, or the sheet with the rules first if the user has not seen it yet.
+    private func request(_ source: Source) {
+        pendingSource = source
+        let gate = PhotoNoticeGate()
+        if gate.shouldShow {
+            showNotice = true
+        } else {
+            openPendingSource()
+        }
+    }
+
+    private func openPendingSource() {
+        let source = pendingSource
+        pendingSource = nil
+        switch source {
+        case .camera: showCamera = true
+        case .library: showLibrary = true
+        case nil: break
+        }
+    }
+
     private var attachMenu: some View {
         Menu {
             // TODO: The camera is unavailable in the simulator, show a hint instead of a disabled button
             Button {
-                showCamera = true
+                request(.camera)
             } label: {
                 Label("Foto aufnehmen", systemImage: "camera")
             }
             .disabled(!CameraPicker.isAvailable)
 
             Button {
-                showLibrary = true
+                request(.library)
             } label: {
                 Label("Aus Mediathek wählen", systemImage: "photo.on.rectangle")
             }

@@ -1,0 +1,20 @@
+# Runtime dependencies of the backend. torch is installed separately (CPU build, see Dockerfile / make install).
+# TODO: Pin the versions once the first release is built.
+pydantic
+langgraph
+gliner2
+transformers
+huggingface_hub
+pillow
+pillow-heif
+opencv-python-headless
+rapidocr
+onnxruntime
+fastapi
+uvicorn
+boto3
+psycopg[binary]
+python-dotenv
+python-multipart
+pyjwt[crypto]
+anthropic

@@ -5,3 +5,23 @@ build/
 DerivedData/
 .build/
 buildServer.json
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+backend/logs/
+backend/THIRD_PARTY_NOTICES.md
+.env.prod
+# Evaluation photos are real photos and never go into the repository: only the cases file and the README are tracked
+backend/eval/*
+!backend/eval/README.md
+!backend/eval/classification_cases.jsonl
+
+# The map file of the dashboard (hundreds of MB, made with pmtiles extract, see docs/dashboard-plan.md)
+tiles/
+*.pmtiles
+
+# Private model weights (downloaded by hand, never committed)
+backend/models-private/
+*.jit
+

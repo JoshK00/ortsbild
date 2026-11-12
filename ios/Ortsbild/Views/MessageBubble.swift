@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-/// Text bubble. User on the right in the accent color, agent on the left in gray.
+/// Text bubble. The user's on the right in white, the agent's on the left in frosted glass.
 struct MessageBubble: View {
     let sender: MessageSender
     let text: String
@@ -16,11 +16,14 @@ struct MessageBubble: View {
             Text(text)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .foregroundStyle(sender == .user ? Color.white : Color.primary)
-                .background(
-                    sender == .user ? Color.accentColor : Color(.secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
+                .foregroundStyle(sender == .user ? Theme.ink : Color.white)
+                .background {
+                    if sender == .user {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.white)
+                    } else {
+                        Color.clear.glassCard(cornerRadius: 18)
+                    }
+                }
             if sender == .agent { Spacer(minLength: 48) }
         }
     }

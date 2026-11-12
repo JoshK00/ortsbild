@@ -1,0 +1,260 @@
+import math
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Literal, Protocol
+
+# The statuses in which a report has a category (it can be released, and counts as a duplicate candidate)
+CLASSIFIED_STATUSES = ("classified", "researched", "drafted")
+
+# How many answers a report takes: the user can describe the problem, add a word, pick a category
+MAX_ANSWERS = 3
+
+Status = Literal["processing", "sanitized", "classified", "needs_input", "researched", "drafted", "blocked_privacy", "rejected"]
+
+
+@dataclass(frozen=True)
+class ReportStatusRow:
+    """Where a report is. Contains no personal data."""
+
+    report_id: str
+    status: Status
+    source_type: str
+    block_reason: str | None = None  # step and error type, never an error message
+
+
+@dataclass(frozen=True)
+class ReportRecord:
+    """A report as the owner sees it: the status, who owns it and the sanitized result.
+
+    `user_key` is the pseudonymous key of the owner (a keyed hash), never the Apple id.
+    `sanitized` is the sanitized report as a dict, there is no raw data in a record.
+    `classification` is the result of the classification as a dict, None until it exists.
+    """
+
+    report_id: str
+    user_key: str | None
+    status: Status
+    block_reason: str | None = None
+    sanitized: dict | None = None
+    classification: dict | None = None
+    research: dict | None = None  # the responsible authority and its sources, None if none was found
+    draft: dict | None = None  # the message for the user to approve, None if none was written
+    approved_at: datetime | None = None  # when the user released the report (it is visible in the dashboard), None until then
+
+
+class ReportStatusStore(Protocol):
+    """Keeps the status of every report, so an operator finds the blocked ones and an owner finds their reports."""
+
+    def set_status(
+        self, report_id: str, status: Status, source_type: str, block_reason: str | None = None
+    ) -> None: ...
+
+    def list_blocked(self) -> list[ReportStatusRow]: ...
+
+    def claim(self, report_id: str, user_key: str, client_report_id: str, source_type: str, tenant: str) -> str:
+        """Register a new report of a user and return the id that owns this `client_report_id`.
+
+        Returns `report_id` if it is new, or the id of the earlier report if the app sent the same
+        `client_report_id` before (a retry). Compare the result with `report_id` to see which.
+        """
+        ...
+
+    def save_sanitized(self, report_id: str, sanitized: dict) -> None: ...
+
+    def start_answer(self, report_id: str) -> bool:
+        """The user answers the open question: move the report from `needs_input` back to `classified`.
+
+        True if it was waiting for an answer and has not used up its answers (`MAX_ANSWERS`). False if not, or if another
+        answer came first, so the research and the draft are started only once (the check and the change are one step).
+        """
+        ...
+
+    def save_classification(self, report_id: str, classification: dict) -> None:
+        """Keep the classification and move the report to the status `classified`."""
+        ...
+
+    def save_research(self, report_id: str, research: dict) -> None:
+        """Keep the result of the research and move the report to the status `researched`."""
+        ...
+
+    def save_draft(self, report_id: str, draft: dict) -> None:
+        """Keep the draft and move the report to the status `drafted`."""
+        ...
+
+    def approve(self, report_id: str) -> bool:
+        """The user releases the report: it is visible in the dashboard from now on and counts as a vote.
+
+        True if the report exists and has a category (`CLASSIFIED_STATUSES`), also if it was released before (the first
+        release time stays). False if not.
+        """
+        ...
+
+    def get(self, report_id: str) -> ReportRecord | None: ...
+
+    def count_recent(self, user_key: str, seconds: int) -> int:
+        """How many reports the user started in the last `seconds` seconds."""
+        ...
+
+    def delete_user(self, user_key: str) -> list[ReportRecord]:
+        """Delete all reports of the user and return them, so their files can be deleted too."""
+        ...
+
+    def delete_report(self, report_id: str, user_key: str) -> ReportRecord | None:
+        """Delete one report of the user and return it, so its files can be deleted too. None if it is not the user's or does not exist."""
+        ...
+
+    def list_nearby(
+        self, category: str, lat: float, lon: float, radius_m: float, since: datetime
+    ) -> list[tuple[ReportRecord, datetime]]:
+        """The reports of ALL users with this category that came in after `since` and lie within about `radius_m` of the point
+        (a square around it, the caller measures the exact distance), oldest first. Only reports that have a category
+        (`CLASSIFIED_STATUSES`). Used to find out whether a report is a duplicate.
+        """
+        ...
+
+    def list_visible(self, key_prefixes: list[str] | None, limit: int) -> list[tuple[ReportRecord, datetime]]:
+        """The RELEASED reports of the users whose user key starts with one of the prefixes, newest first, with the time they came in.
+
+        Only reports that have a category (`CLASSIFIED_STATUSES`) and that the user released (`approved_at`). Nothing is
+        returned for an empty list of prefixes.
+        """
+        ...
+
+
+class InMemoryReportStatusStore:
+    """Keeps the statuses in a dict. For tests and local experiments, nothing is persisted."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, ReportStatusRow] = {}
+        self.owners: dict[str, str] = {}  # report id -> user key
+        self.client_ids: dict[tuple[str, str], str] = {}  # (user key, client report id) -> report id
+        self.sanitized: dict[str, dict] = {}
+        self.classifications: dict[str, dict] = {}
+        self.research: dict[str, dict] = {}
+        self.drafts: dict[str, dict] = {}
+        self.answers: dict[str, int] = {}  # how often the user answered the question of a report
+        self.started_at: dict[str, float] = {}  # report id -> time.monotonic()
+        self.created_at: dict[str, datetime] = {}  # report id -> when it came in
+        self.approved: dict[str, datetime] = {}  # report id -> when the user released it
+
+    def set_status(
+        self, report_id: str, status: Status, source_type: str, block_reason: str | None = None
+    ) -> None:
+        self.rows[report_id] = ReportStatusRow(report_id, status, source_type, block_reason)
+
+    def list_blocked(self) -> list[ReportStatusRow]:
+        return [row for row in self.rows.values() if row.status == "blocked_privacy"]
+
+    def claim(self, report_id: str, user_key: str, client_report_id: str, source_type: str, tenant: str) -> str:
+        existing = self.client_ids.get((user_key, client_report_id))
+        if existing is not None:
+            return existing
+        self.client_ids[(user_key, client_report_id)] = report_id
+        self.owners[report_id] = user_key
+        self.started_at[report_id] = time.monotonic()
+        self.created_at[report_id] = datetime.now(timezone.utc)
+        self.rows[report_id] = ReportStatusRow(report_id, "processing", source_type)
+        return report_id
+
+    def save_sanitized(self, report_id: str, sanitized: dict) -> None:
+        self.sanitized[report_id] = sanitized
+
+    def start_answer(self, report_id: str) -> bool:
+        row = self.rows.get(report_id)
+        if row is None or row.status != "needs_input" or self.answers.get(report_id, 0) >= MAX_ANSWERS:
+            return False
+        self.answers[report_id] = self.answers.get(report_id, 0) + 1
+        self.rows[report_id] = ReportStatusRow(report_id, "classified", row.source_type, row.block_reason)
+        return True
+
+    def save_classification(self, report_id: str, classification: dict) -> None:
+        self.classifications[report_id] = classification
+        row = self.rows[report_id]
+        self.rows[report_id] = ReportStatusRow(report_id, "classified", row.source_type, row.block_reason)
+
+    def save_research(self, report_id: str, research: dict) -> None:
+        self.research[report_id] = research
+        row = self.rows[report_id]
+        self.rows[report_id] = ReportStatusRow(report_id, "researched", row.source_type, row.block_reason)
+
+    def save_draft(self, report_id: str, draft: dict) -> None:
+        self.drafts[report_id] = draft
+        row = self.rows[report_id]
+        self.rows[report_id] = ReportStatusRow(report_id, "drafted", row.source_type, row.block_reason)
+
+    def approve(self, report_id: str) -> bool:
+        row = self.rows.get(report_id)
+        if row is None or row.status not in CLASSIFIED_STATUSES:
+            return False
+        self.approved.setdefault(report_id, datetime.now(timezone.utc))
+        return True
+
+    def get(self, report_id: str) -> ReportRecord | None:
+        row = self.rows.get(report_id)
+        if row is None:
+            return None
+        return ReportRecord(
+            report_id, self.owners.get(report_id), row.status, row.block_reason,
+            self.sanitized.get(report_id), self.classifications.get(report_id), self.research.get(report_id),
+            self.drafts.get(report_id), self.approved.get(report_id),
+        )
+
+    def count_recent(self, user_key: str, seconds: int) -> int:
+        now = time.monotonic()
+        return sum(1 for rid, owner in self.owners.items() if owner == user_key and now - self.started_at[rid] <= seconds)
+
+    def delete_user(self, user_key: str) -> list[ReportRecord]:
+        deleted = [self.get(rid) for rid, owner in list(self.owners.items()) if owner == user_key]
+        for record in deleted:
+            rid = record.report_id
+            self.rows.pop(rid, None)
+            self.sanitized.pop(rid, None)
+            self.classifications.pop(rid, None)
+            self.research.pop(rid, None)
+            self.drafts.pop(rid, None)
+            self.started_at.pop(rid, None)
+            self.created_at.pop(rid, None)
+            self.approved.pop(rid, None)
+            self.owners.pop(rid, None)
+        self.client_ids = {k: v for k, v in self.client_ids.items() if k[0] != user_key}
+        return deleted
+
+    def delete_report(self, report_id: str, user_key: str) -> ReportRecord | None:
+        if self.owners.get(report_id) != user_key:
+            return None
+        record = self.get(report_id)
+        for store in (self.rows, self.sanitized, self.classifications, self.research, self.drafts, self.started_at, self.created_at,
+                      self.approved, self.owners, self.answers):
+            store.pop(report_id, None)
+        self.client_ids = {k: v for k, v in self.client_ids.items() if v != report_id}
+        return record
+
+    def list_visible(self, key_prefixes: list[str] | None, limit: int) -> list[tuple[ReportRecord, datetime]]:
+        if key_prefixes is not None and not key_prefixes:
+            return []
+        found = [
+            (self.get(report_id), self.created_at[report_id])
+            for report_id, owner in self.owners.items()
+            if (key_prefixes is None or owner.startswith(tuple(key_prefixes))) and self.rows[report_id].status in CLASSIFIED_STATUSES
+            and report_id in self.approved
+        ]
+        return sorted(found, key=lambda pair: pair[1], reverse=True)[:limit]
+
+    def list_nearby(
+        self, category: str, lat: float, lon: float, radius_m: float, since: datetime
+    ) -> list[tuple[ReportRecord, datetime]]:
+        found = []
+        for report_id, owner in self.owners.items():
+            record = self.get(report_id)
+            location = ((record.sanitized or {}).get("location")) or {}
+            if (
+                record.status in CLASSIFIED_STATUSES
+                and (record.classification or {}).get("category") == category
+                and self.created_at[report_id] > since
+                and isinstance(location.get("lat"), (int, float))
+                and abs(location["lat"] - lat) <= radius_m / 111_195
+                and abs(location["lon"] - lon) <= radius_m / (111_195 * max(0.01, math.cos(math.radians(lat))))
+            ):
+                found.append((record, self.created_at[report_id]))
+        return sorted(found, key=lambda pair: pair[1])

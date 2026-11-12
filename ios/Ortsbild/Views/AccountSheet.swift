@@ -11,7 +11,9 @@ struct AccountSheet: View {
     @Environment(AuthViewModel.self) private var auth
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
+    @Environment(TicketStore.self) private var store
     @State private var confirmsDeletion = false
+    @State private var confirmsHistoryDeletion = false
 
     // TODO: Move texts into a String Catalog (localization), German only for now
 
@@ -60,8 +62,7 @@ struct AccountSheet: View {
                 .multilineTextAlignment(.center)
 
             SignInWithAppleButton(.signIn) { request in
-                // No name or e-mail needed, the pseudonymous ID is enough.
-                request.requestedScopes = []
+                auth.prepare(request)
             } onCompletion: { result in
                 auth.handle(result)
             }
@@ -83,12 +84,28 @@ struct AccountSheet: View {
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
             }
-            // TODO: Show the user's own reports once `GET /reports` exists
+            // TODO: Show the user's own reports once `GET /v1/reports` (the list) exists
 
             Button("Abmelden") {
                 auth.signOut()
             }
             .buttonStyle(.bordered)
+
+            Button("Verlauf auf diesem iPhone löschen", role: .destructive) {
+                confirmsHistoryDeletion = true
+            }
+            .buttonStyle(.bordered)
+            .confirmationDialog(
+                "Alle Meldungen auf diesem iPhone löschen?",
+                isPresented: $confirmsHistoryDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("Verlauf löschen", role: .destructive) {
+                    store.deleteAll()
+                }
+            } message: {
+                Text("Das entfernt nur den Verlauf hier auf dem iPhone. Die Meldungen auf dem Server bleiben, bis du dein Konto löschst.")
+            }
 
             Button("Account löschen", role: .destructive) {
                 confirmsDeletion = true
@@ -110,5 +127,6 @@ struct AccountSheet: View {
 
 #Preview("Abgemeldet") {
     AccountSheet()
-        .environment(AuthViewModel())
+        .environment(TicketStore.preview)
+        .environment(AuthViewModel(service: MockAuthService()))
 }

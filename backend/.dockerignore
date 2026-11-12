@@ -1,0 +1,16 @@
+.venv
+.env
+logs
+__pycache__
+.pytest_cache
+tests
+*.md
+# the notices travel with the image
+!MODEL_NOTICES.md
+!THIRD_PARTY_NOTICES.md
+!assets/README.md
+dashboard/tiles
+*.pmtiles
+# photos of people for the tests, they are not for the server or the image (the seed photos are copied by hand)
+eval/faces
+eval/seed
