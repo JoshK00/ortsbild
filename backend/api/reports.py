@@ -162,6 +162,25 @@ def case_info(services: Services, record: ReportRecord) -> dict | None:
     }
 
 
+def owned_record(services: Services, report_id: str, user: AccessClaims) -> ReportRecord:
+    """The report if it belongs to the user, else 404. The same answer for a foreign report, so ids cannot be probed."""
+    record = services.status_store.get(report_id)
+    if record is None or record.user_key != user.user_key:
+        raise HTTPException(404, "no such report")
+    return record
+
+
+def payload_for(services: Services, record: ReportRecord) -> dict:
+    """What the app gets for a report, with the duplicate information of its case (see `report_payload`)."""
+    return report_payload(record, case_info(services, record))
+
+
+def check_rate_limit(services: Services, user: AccessClaims, reports_per_hour: int) -> None:
+    """429 if the user sent `reports_per_hour` reports or more within the last hour. Used by every way a report comes in."""
+    if services.status_store.count_recent(user.user_key, RATE_WINDOW_SECONDS) >= reports_per_hour:
+        raise HTTPException(429, "too many reports, try again later")
+
+
 class AnswerBody(BaseModel):
     """The answer to the question what the picture shows: one of the categories, or the problem in the user's own words.
 
@@ -195,13 +214,10 @@ def create_reports_router(
     router = APIRouter(prefix="/v1")
 
     def own_report(report_id: str, user: AccessClaims) -> ReportRecord:
-        record = get_services().status_store.get(report_id)
-        if record is None or record.user_key != user.user_key:
-            raise HTTPException(404, "no such report")  # the same answer for a foreign report, so ids cannot be probed
-        return record
+        return owned_record(get_services(), report_id, user)
 
     def payload_of(record: ReportRecord) -> dict:
-        return report_payload(record, case_info(get_services(), record))
+        return payload_for(get_services(), record)
 
     @router.post("/reports")
     def create_report(
@@ -227,8 +243,7 @@ def create_reports_router(
         Returns the sanitized report, or status "blocked" / "rejected" if the privacy layer stopped it.
         """
         services = get_services()
-        if services.status_store.count_recent(user.user_key, RATE_WINDOW_SECONDS) >= reports_per_hour:
-            raise HTTPException(429, "too many reports, try again later")
+        check_rate_limit(services, user, reports_per_hour)
         text = text.strip() if text else None
         data = photo.file.read(MAX_PHOTO_BYTES + 1) if photo is not None else b""
         if len(data) > MAX_PHOTO_BYTES:

@@ -1,143 +1,52 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Connector Gateway",
-    "description": "Receives citizen reports from all channels and stores them in one canonical format.",
-    "version": "0.1.0"
+    "title": "Kommunio Connector Gateway",
+    "description": "Takes reports in from a channel and hands them to the backend in its format (IncomingReport). Channels: the app. TODO: email and partner apps.",
+    "version": "0.2.0"
   },
   "paths": {
     "/v1/reports": {
       "post": {
-        "tags": [
-          "reports"
-        ],
-        "summary": "Submit a new report from the app",
-        "description": "Multipart form. `photo` or `text` (or both) is required. Sending the same `client_report_id` again returns the existing report with status code 200 instead of creating a duplicate, so the app can safely retry after a network error.",
+        "summary": "Send a report from the app",
+        "description": "The request of the app as the backend defines it (backend/api/reports.py). The answer is the one of the backend: the sanitized report with classification, authority and draft, or status blocked or rejected.",
         "operationId": "create_report_v1_reports_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/Body_create_report_v1_reports_post"
               }
             }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportReceipt"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Report with this client_report_id already exists.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportReceipt"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "Content Too Large",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Unprocessable Content",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
           }
         },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/reports/{report_id}": {
-      "get": {
-        "tags": [
-          "reports"
-        ],
-        "summary": "Current status of a report",
-        "description": "The app maps `status` to a localized text itself.",
-        "operationId": "get_report_status_v1_reports__report_id__get",
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "report_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Report Id"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportStatusView"
-                }
+                "schema": {}
               }
             }
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
           },
           "422": {
             "description": "Validation Error",
@@ -157,7 +66,7 @@
         "tags": [
           "ops"
         ],
-        "summary": "Liveness check",
+        "summary": "Liveness check, for the compose network",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -184,22 +93,10 @@
         "properties": {
           "client_report_id": {
             "type": "string",
-            "format": "uuid",
-            "title": "Client Report Id",
-            "description": "UUID generated by the app, used for safe retries."
-          },
-          "device_id": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Device Id",
-            "description": "Anonymous, app-generated ID."
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At",
-            "description": "When the citizen created the report (ISO 8601)."
+            "maxLength": 64,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9-]+$",
+            "title": "Client Report Id"
           },
           "lat": {
             "type": "number",
@@ -213,19 +110,6 @@
             "minimum": -180.0,
             "title": "Lon"
           },
-          "accuracy_m": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accuracy M",
-            "description": "Horizontal GPS accuracy in metres."
-          },
           "text": {
             "anyOf": [
               {
@@ -238,11 +122,101 @@
             ],
             "title": "Text"
           },
-          "anonymized_on_device": {
-            "type": "boolean",
-            "title": "Anonymized On Device",
-            "description": "True if faces and licence plates were blurred on the device.",
-            "default": true
+          "accuracy_m": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy M"
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "district": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "District"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          },
+          "house_number": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "House Number"
           },
           "photo": {
             "anyOf": [
@@ -254,49 +228,16 @@
                 "type": "null"
               }
             ],
-            "title": "Photo",
-            "description": "JPEG or PNG."
+            "title": "Photo"
           }
         },
         "type": "object",
         "required": [
           "client_report_id",
-          "device_id",
-          "created_at",
           "lat",
           "lon"
         ],
         "title": "Body_create_report_v1_reports_post"
-      },
-      "ErrorDetail": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "title": "Code"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "message"
-        ],
-        "title": "ErrorDetail"
-      },
-      "ErrorResponse": {
-        "properties": {
-          "detail": {
-            "$ref": "#/components/schemas/ErrorDetail"
-          }
-        },
-        "type": "object",
-        "required": [
-          "detail"
-        ],
-        "title": "ErrorResponse"
       },
       "HTTPValidationError": {
         "properties": {
@@ -310,70 +251,6 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
-      },
-      "ReportReceipt": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ReportStatus"
-          },
-          "received_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Received At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "status",
-          "received_at"
-        ],
-        "title": "ReportReceipt"
-      },
-      "ReportStatus": {
-        "type": "string",
-        "enum": [
-          "received",
-          "enriched",
-          "awaiting_approval",
-          "approved",
-          "forwarded",
-          "resolved",
-          "closed",
-          "duplicate",
-          "rejected"
-        ],
-        "title": "ReportStatus",
-        "description": "Lifecycle of a report. The gateway only ever sets ``received``."
-      },
-      "ReportStatusView": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ReportStatus"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "status",
-          "updated_at"
-        ],
-        "title": "ReportStatusView"
       },
       "ValidationError": {
         "properties": {
@@ -414,13 +291,6 @@
           "type"
         ],
         "title": "ValidationError"
-      }
-    },
-    "securitySchemes": {
-      "APIKeyHeader": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-API-Key"
       }
     }
   }

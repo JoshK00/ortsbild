@@ -1,3 +1,3 @@
-"""Connector gateway: turns reports from any channel into one canonical format."""
+"""Connector gateway: takes reports in from a channel and hands them to the backend in its format (`IncomingReport`)."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -7,6 +7,23 @@
 		max_size 25MB
 	}
 
+	# The entrance of the backend for the gateway is for the compose network only, never from outside.
+	handle /internal/* {
+		respond 404
+	}
+
+	# New reports go through the connector gateway, which hands them to the backend (services/gateway/README.md).
+	@new_report {
+		method POST
+		path /v1/reports
+	}
+	handle @new_report {
+		reverse_proxy gateway:8000
+	}
+
+	# Everything else of the app and the dashboard goes straight to the backend.
 	# TODO: /health shows the names of our checks. Restrict it before real operation.
-	reverse_proxy backend:8000
+	handle {
+		reverse_proxy backend:8000
+	}
 }

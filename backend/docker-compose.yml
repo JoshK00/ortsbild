@@ -59,6 +59,19 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
 
+  # The connector gateway: takes new reports in and hands them to the backend (services/gateway/README.md).
+  # It reads the same .env (STORAGE_*, GATEWAY_KEY). Locally there is no Caddy: new reports go to port 8080.
+  gateway:
+    build: ../services/gateway
+    depends_on:
+      - backend
+    env_file: .env
+    environment:
+      BACKEND_URL: http://backend:8000
+      STORAGE_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "127.0.0.1:8080:8000"
+
 volumes:
   pgdata:
   miniodata:

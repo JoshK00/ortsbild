@@ -57,6 +57,7 @@ def main() -> int:
         *[f"{key}={values[key]}" for key in STORAGE_KEYS],
         f"API_KEY={secrets.token_hex(24)}",
         f"AUTH_SECRET={secrets.token_hex(32)}",
+        f"GATEWAY_KEY={secrets.token_hex(32)}",
         f"PSEUDONYM_SECRET={secrets.token_hex(32)}",
     ]
     print("\n".join(lines))

@@ -1,97 +1,71 @@
 import io
-from email.message import EmailMessage
+import json
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from PIL.ExifTags import IFD
 
-from gateway.config import Settings
-from gateway.db import ReportRepository
-from gateway.ingest import IngestService
+from gateway.backend import BackendAnswer, BackendTimeout, BackendUnreachable
 from gateway.main import create_app
-from gateway.storage import LocalStorage
+from gateway.raw_store import InMemoryRawPhotoStore
 
-API_KEY = "test-key"
+TOKEN = {"Authorization": "Bearer token-of-anna"}
+FORM = {"client_report_id": "1B9D6BCD-BBFD-4B2D-9B5D-AB8DFBBD4BED", "lat": "48.7758", "lon": "9.1829"}
+
+
+def make_image(fmt: str = "JPEG", size=(40, 20)) -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", size, (200, 30, 30)).save(output, format=fmt)
+    return output.getvalue()
+
+
+def make_heic(size=(40, 20)) -> bytes:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+    output = io.BytesIO()
+    Image.new("RGB", size, (30, 200, 30)).save(output, format="HEIF")
+    return output.getvalue()
+
+
+class FakeBackend:
+    """Stands in for the backend. By default it answers like the backend does for a new report: 200 with its payload."""
+
+    def __init__(self):
+        self.calls: list[tuple[dict, str]] = []
+        self.status_code = 200
+        self.body: dict | None = None  # None: a payload for the submitted report
+        self.error: Exception | None = None
+
+    def submit(self, submission: dict, authorization: str) -> BackendAnswer:
+        self.calls.append((submission, authorization))
+        if self.error:
+            raise self.error
+        body = self.body if self.body is not None else {"id": submission["id"], "status": "sanitized"}
+        www = "Bearer" if self.status_code == 401 else None
+        return BackendAnswer(self.status_code, json.dumps(body).encode(), "application/json", www)
 
 
 @pytest.fixture
-def settings(tmp_path) -> Settings:
-    return Settings(
-        _env_file=None,
-        tenant="test-town",
-        api_keys=[API_KEY],
-        database_url=f"sqlite:///{tmp_path / 'test.db'}",
-        storage_backend="local",
-        storage_local_root=str(tmp_path / "storage"),
-    )
+def backend() -> FakeBackend:
+    return FakeBackend()
 
 
 @pytest.fixture
-def storage(settings) -> LocalStorage:
-    return LocalStorage(settings.storage_local_root)
+def store() -> InMemoryRawPhotoStore:
+    return InMemoryRawPhotoStore()
 
 
 @pytest.fixture
-def client(settings, storage) -> TestClient:
-    return TestClient(create_app(settings, storage))
+def client(store, backend) -> TestClient:
+    return TestClient(create_app(raw_store=store, backend=backend))
 
 
 @pytest.fixture
-def ingest(settings, storage) -> IngestService:
-    return IngestService(settings, ReportRepository.from_url(settings.database_url), storage)
+def unreachable():
+    return BackendUnreachable()
 
 
-def make_jpeg(width=3000, height=2000, gps: tuple[float, float] | None = None, camera="TestPhone 12") -> bytes:
-    """JPEG with camera metadata and optionally a GPS position in EXIF."""
-    img = Image.new("RGB", (width, height), (120, 140, 160))
-    exif = Image.Exif()
-    exif[0x0110] = camera  # Model
-    if gps:
-        lat, lon = gps
-        exif[IFD.GPSInfo] = {
-            1: "N" if lat >= 0 else "S",
-            2: _to_dms(abs(lat)),
-            3: "E" if lon >= 0 else "W",
-            4: _to_dms(abs(lon)),
-        }
-    out = io.BytesIO()
-    img.save(out, format="JPEG", exif=exif)
-    return out.getvalue()
-
-
-def _to_dms(value: float) -> tuple[float, float, float]:
-    degrees = int(value)
-    minutes = int((value - degrees) * 60)
-    seconds = round((value - degrees - minutes / 60) * 3600, 4)
-    return (float(degrees), float(minutes), seconds)
-
-
-def make_email(
-    subject="Schlagloch Gartengasse",
-    body="Großes Schlagloch vor Hausnummer 12.",
-    sender="buerger@example.org",
-    message_id="<abc123@example.org>",
-    images: list[bytes] | None = None,
-    headers: dict[str, str] | None = None,
-    html: str | None = None,
-) -> bytes:
-    msg = EmailMessage()
-    msg["From"] = f"Bürger <{sender}>"
-    msg["To"] = "melden@example.gov"
-    msg["Subject"] = subject
-    msg["Date"] = "Sun, 01 Nov 2026 20:15:00 +0100"
-    if message_id:
-        msg["Message-ID"] = message_id
-    for name, value in (headers or {}).items():
-        msg[name] = value
-    if body is not None:
-        msg.set_content(body)
-    if html is not None:
-        if body is None:
-            msg.set_content(html, subtype="html")
-        else:
-            msg.add_alternative(html, subtype="html")
-    for i, data in enumerate(images or []):
-        msg.add_attachment(data, maintype="image", subtype="jpeg", filename=f"foto{i}.jpg")
-    return msg.as_bytes()
+@pytest.fixture
+def timeout():
+    return BackendTimeout()

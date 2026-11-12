@@ -1,58 +1,44 @@
-"""FastAPI application factory.
+"""The gateway app.
 
-Run locally:  uvicorn --factory gateway.main:create_app --reload
+Run locally:  uvicorn --factory gateway.main:create_app --port 8080
 """
 
-import logging
-
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 
 from . import __version__
-from .api import reports
+from .app_channel import router as app_router
+from .backend import BackendClient
 from .config import Settings, get_settings
-from .db import ReportRepository
-from .ingest import IngestService
-from .storage import Storage, build_storage
-
-log = logging.getLogger(__name__)
+from .raw_store import RawPhotoStore, s3_raw_store
 
 
-def create_app(settings: Settings | None = None, storage: Storage | None = None) -> FastAPI:
-    settings = settings or get_settings()
-    repo = ReportRepository.from_url(settings.database_url)
-    storage = storage or build_storage(settings)
+def create_app(
+    settings: Settings | None = None,
+    raw_store: RawPhotoStore | None = None,
+    backend: BackendClient | None = None,
+) -> FastAPI:
+    """Without arguments the real parts are built from the environment. Tests pass their own store and backend."""
+    if raw_store is None or backend is None:
+        settings = settings or get_settings()
+    raw_store = raw_store or s3_raw_store(settings)
+    backend = backend or BackendClient(
+        settings.backend_url, settings.gateway_key.get_secret_value(), settings.backend_timeout_s
+    )
 
     app = FastAPI(
-        title="Connector Gateway",
+        title="Kommunio Connector Gateway",
         version=__version__,
-        description="Receives citizen reports from all channels and stores them in one canonical format.",
+        description=(
+            "Takes reports in from a channel and hands them to the backend in its format (IncomingReport). "
+            "Channels: the app. TODO: email and partner apps."
+        ),
     )
-    app.state.settings = settings
-    app.state.repo = repo
-    app.state.ingest = IngestService(settings, repo, storage)
-    app.include_router(reports.router)
+    app.state.raw_store = raw_store
+    app.state.backend = backend
+    app.include_router(app_router)
 
-    @app.exception_handler(RequestValidationError)
-    async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
-        # Same error shape as every other error: {"detail": {"code", "message", ...}}
-        fields = [".".join(str(p) for p in err["loc"] if p != "body") for err in exc.errors()]
-        return JSONResponse(
-            status_code=422,
-            content={
-                "detail": {
-                    "code": "validation_error",
-                    "message": "Invalid or missing fields: " + ", ".join(fields),
-                    "fields": fields,
-                }
-            },
-        )
-
-    @app.get("/health", tags=["ops"], summary="Liveness check")
+    @app.get("/health", tags=["ops"], summary="Liveness check, for the compose network")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    if not settings.api_keys:
-        log.warning("GATEWAY_API_KEYS is empty: the API accepts requests without a key (dev only).")
     return app

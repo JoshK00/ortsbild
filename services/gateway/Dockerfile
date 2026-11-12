@@ -7,7 +7,8 @@ COPY pyproject.toml ./
 COPY gateway ./gateway
 RUN pip install --no-cache-dir .
 
-RUN useradd --create-home appuser && mkdir -p /app/data && chown appuser /app/data
+# Run as a normal user, not as root
+RUN useradd --create-home appuser
 USER appuser
 
 EXPOSE 8000

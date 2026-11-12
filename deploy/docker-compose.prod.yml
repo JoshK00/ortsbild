@@ -1,4 +1,4 @@
-# Production stack for the Cube: Caddy (HTTPS), the backend and PostgreSQL.
+# Production stack for the Cube: Caddy (HTTPS), the connector gateway, the backend and PostgreSQL.
 # The photos live in the IONOS object storage, so there is no MinIO here.
 # Start (on the server, in ~/ortsbild/deploy):
 #   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
@@ -20,6 +20,19 @@ services:
       - caddy_config:/config
     depends_on:
       - backend
+      - gateway
+
+  # The connector gateway: Caddy sends it the new reports, it hands them to the backend (services/gateway/README.md).
+  # It reads the same env file (STORAGE_*, GATEWAY_KEY).
+  gateway:
+    build: ../services/gateway
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+    # No published port: only Caddy reaches the gateway, inside the compose network.
 
   backend:
     build: ../backend

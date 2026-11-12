@@ -1,136 +1,75 @@
 # Connector Gateway
 
-Receives citizen reports from every channel and stores them in **one canonical format**. It contains no AI and no agent logic: it validates, normalizes and stores. The agents pick up reports with status `received` afterwards.
+The entrance for new reports. It takes a report in from a channel, checks the input of that channel and hands the report to the backend **in the backend's format** (`IncomingReport`, see `backend/models/incoming_report.py`). It contains no AI and keeps no data of its own: the backend and its agent network set the rules, the gateway adapts to them.
 
-MVP channels: **iOS app** (HTTP API) and **email** (IMAP worker).
+Channels today: **the app**. Planned: email, partner apps (see the TODOs).
 
 ```
-iOS app ──HTTP──► api/reports.py ─► adapters/ios.py ───┐
-                                                       ├─► IncomingReport ─► ingest.py ─► photo to storage
-Mailbox ──IMAP──► workers/imap_poller.py ─► adapters/email.py ─┘                            row in Postgres (status "received")
+                      ┌──────────── Caddy ────────────┐
+iPhone app ── POST /v1/reports ──► gateway ──► backend: POST /internal/v1/reports ──► privacy → classification → research → draft
+           ── everything else (login, answer, approve, photos, dashboard) ─────────► backend
 ```
 
-Every channel is a small adapter that only produces an `IncomingReport`. Everything after that, `IngestService.ingest()`, is identical for all channels: idempotency, photo processing, storage, database. A new channel (Open311, messenger) means one new adapter and nothing else.
+## What the gateway does with a report from the app
+
+1. **Same request as before.** `POST /v1/reports` takes exactly the form the app sends (`ios/Ortsbild/Services/BackendClient.swift`) with the same rules as the backend (`backend/api/reports.py`). The app does not change.
+2. **Checks the channel input**: form fields, photo size (15 MB) and the real image type (JPEG, PNG, HEIC, read from the file).
+3. **Stores the raw photo** in the raw bucket of the backend, at the ref the privacy layer expects: `raw/<report id>/p1.<ext>`. The photo is not changed: removing metadata and covering faces is the job of the privacy layer.
+4. **Builds the report** in the backend's format (`GatewaySubmission` = `IncomingReport` without the user, `backend/models/gateway_submission.py`).
+5. **Hands it over** to `POST /internal/v1/reports` with the user's token (passed on unchanged, the backend checks it) and the shared `GATEWAY_KEY`.
+6. **Relays the answer** of the backend to the app as it is (status code and body).
+
+Who owns the raw photo: until the backend takes the report, the gateway. If the backend does not take it (401, 403, 422, 429, a retry of an existing report, or the backend is unreachable), the gateway deletes the photo. Once the backend took it, its privacy layer deletes the raw photo after the sanitized copy exists. On a backend error (5xx) or a timeout the gateway leaves it, as the privacy layer keeps the raw data of a failed run for the operator.
 
 ## Layout
 
 | Path | What it does |
 | --- | --- |
-| `gateway/schema.py` | Canonical report (`CanonicalReport`), enums, adapter output (`IncomingReport`) |
-| `gateway/ingest.py` | The one code path all channels share |
-| `gateway/images.py` | Validates photos, reads GPS from EXIF, downscales to 2000 px, strips all metadata |
-| `gateway/storage.py` | `LocalStorage` (dev) and `S3Storage` (Supabase Storage, MinIO, AWS) |
-| `gateway/db.py` | SQLAlchemy model and repository (SQLite for dev, Postgres/Supabase in production) |
-| `gateway/api/reports.py` | HTTP endpoints for the app |
-| `gateway/adapters/` | `ios.py`, `email.py` |
-| `gateway/workers/imap_poller.py` | Polls the mailbox, ingests, files each message into a folder |
-| `../../docs/api/openapi.json` | **The contract with the app.** Generated, never edited by hand |
+| `gateway/app_channel.py` | The app channel: `POST /v1/reports` |
+| `gateway/photos.py` | Is the upload really a JPEG, PNG or HEIC? |
+| `gateway/raw_store.py` | Writes into the raw bucket of the backend (S3, locally MinIO) |
+| `gateway/backend.py` | Hands a report to the backend's entrance |
+| `gateway/config.py` | Settings, with the same variable names as the backend |
+| `../../backend/api/gateway.py` | The backend's entrance for the gateway |
+| `../../docs/api/openapi.json` | The request of the app as the gateway takes it. Generated, never edited by hand |
 
-## Run locally
+## Configuration
 
-```bash
+The gateway reads the env file of the backend (the names are the same), plus two of its own:
+
+| Variable | Meaning |
+| --- | --- |
+| `GATEWAY_KEY` | Shared secret of gateway and backend. Without it in the backend, its entrance for the gateway does not exist. |
+| `BACKEND_URL` | Default `http://backend:8000` (inside docker compose) |
+| `STORAGE_ENDPOINT_URL`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_REGION`, `STORAGE_BUCKET_RAW` | The raw bucket of the backend |
+
+## Run locally (with the backend)
+
+In `backend/` (see the backend's setup for `.env`), add `GATEWAY_KEY` to `backend/.env` (any long random text), then:
+
+```powershell
+cd backend
+docker compose up --build
+```
+
+The gateway runs on `http://localhost:8080`, the backend on `http://localhost:8000`. Locally there is no Caddy: send new reports to port 8080, everything else to port 8000.
+
+## Tests
+
+```powershell
 cd services/gateway
-python -m venv .venv && source .venv/bin/activate
+py -3.12 -m venv .venv
+.venv\Scripts\activate
 pip install -e ".[dev]"
-cp .env.example .env            # adjust if needed
-uvicorn --factory gateway.main:create_app --reload
+pytest
 ```
 
-Interactive API docs: http://localhost:8000/docs
+`tests/test_with_backend.py` runs the gateway together with the real backend code. It needs the backend's dependencies (`pip install -r ../../backend/requirements.txt`) and is skipped without them.
 
-Tests and lint:
+Before a commit: `ruff check .`, `ruff format .` and `python scripts/export_openapi.py` (CI checks all three).
 
-```bash
-pytest -q
-ruff check . && ruff format --check .
-```
+## Open
 
-With Docker: `docker compose up` (API only) or `docker compose --profile email up` (API + email worker).
-
-### Testing from a real iPhone
-
-The phone cannot reach `localhost`, and iOS requires HTTPS. During development, expose the local server through a tunnel, for example `cloudflared tunnel --url http://localhost:8000` or `ngrok http 8000`, and point the app at the HTTPS URL it prints.
-
-## API contract (for the iOS app)
-
-Authentication: header `X-API-Key: <key>` on every `/v1` request.
-
-### `POST /v1/reports` (multipart/form-data)
-
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `client_report_id` | UUID | yes | Generated by the app. Resending the same ID returns the existing report (HTTP 200) instead of creating a duplicate, so retries after a network error are safe. |
-| `device_id` | string ≤ 128 | yes | Anonymous, app-generated. Used to route status back to the device. |
-| `created_at` | ISO 8601 datetime | yes | When the citizen created the report. |
-| `lat`, `lon` | float | yes | Device GPS. |
-| `accuracy_m` | float | no | Horizontal accuracy in metres. Above `GATEWAY_MAX_LOCATION_ACCURACY_M` (default 200) → 422 `location_too_imprecise`. |
-| `text` | string ≤ 5000 | one of text/photo | |
-| `photo` | file (JPEG or PNG) | one of text/photo | Max 15 MB. The gateway downscales and strips EXIF anyway. |
-| `anonymized_on_device` | bool | no, default `true` | `true` if faces and licence plates were blurred on the device (Apple Vision). |
-
-Responses: `201` new report, `200` same `client_report_id` seen before. Body: `{"id", "status", "received_at"}`.
-
-### `GET /v1/reports/{id}`
-
-Body: `{"id", "status", "updated_at"}`. The app maps `status` to a localized text itself. Possible values: `received`, `enriched`, `awaiting_approval`, `approved`, `forwarded`, `resolved`, `closed`, `duplicate`, `rejected`.
-
-### Errors
-
-Every error has the same shape, so the app can switch on `code`:
-
-```json
-{"detail": {"code": "empty_report", "message": "Send a photo, a text, or both."}}
-```
-
-| HTTP | `code` |
-| --- | --- |
-| 401 | `invalid_api_key` |
-| 404 | `not_found` |
-| 413 | `photo_too_large` |
-| 422 | `validation_error` (with `fields`), `empty_report`, `invalid_photo`, `location_too_imprecise` |
-
-## Email channel
-
-The worker polls `GATEWAY_IMAP_INBOX` every `GATEWAY_IMAP_POLL_INTERVAL_S` seconds and moves each unseen message to exactly one folder:
-
-| Folder | When |
-| --- | --- |
-| `processed` | Stored as a report, or was stored before (same `Message-ID`) |
-| `ignored` | Auto-reply, bounce, mailing list, or no text and no usable photo |
-| `failed` | Unexpected error. Fix the cause, move the message back to the inbox to retry |
-
-How an email becomes a report:
-
-- **Text** = subject + body. HTML-only mails are converted to text; quoted reply lines (`> ...`) are dropped.
-- **Idempotency** via the `Message-ID` header (fallback: SHA-256 of the raw message).
-- **Location**: emails carry no device GPS. The gateway reads it from the photo's EXIF data *before* stripping it (`location.source = "exif"`). Without EXIF GPS, `location` stays empty and the intake agent tries to geocode an address in the text (`source = "text"`). If that fails too, a later step asks the citizen by reply mail.
-- **Privacy**: email photos are not anonymized, so they go to the private bucket `GATEWAY_STORAGE_BUCKET_RAW` with `anonymized = false`. The server-side privacy check moves them to the anonymized bucket later. Photos from the app go straight to `GATEWAY_STORAGE_BUCKET_ANONYMIZED`.
-- **Broken attachments** are skipped (logged); the text is still stored.
-- **Reply address**: `Reply-To`, else `From`. Status updates go there.
-
-## Supabase
-
-- **Database**: set `GATEWAY_DATABASE_URL` to the Postgres connection string (`postgresql+psycopg://...`). The `reports` table is created on startup (MVP; switch to Alembic migrations before the schema starts changing).
-- **Storage**: create two buckets, `reports-anonymized` and `reports-raw`, both **private**. Enable the S3 protocol in the storage settings, create an S3 access key, then set `GATEWAY_STORAGE_BACKEND=s3`, `GATEWAY_S3_ENDPOINT_URL`, `GATEWAY_S3_ACCESS_KEY_ID` and `GATEWAY_S3_SECRET_ACCESS_KEY`.
-- Choose an EU region when creating the project.
-
-## Design decisions
-
-| Decision | Why |
-| --- | --- |
-| Photo travels through the gateway (multipart), not directly from the app to Supabase | One request, one contract, and the gateway can enforce size, format and metadata stripping. Direct upload with signed URLs is an option once volume grows. |
-| Gateway always re-encodes photos | Strips all metadata (device, time, GPS) and caps size, regardless of what the client did. |
-| Two buckets (raw / anonymized) | Unanonymized photos never sit next to anonymized ones; the raw bucket can get a short retention period. |
-| `(channel, source_id)` is unique in the database | Retries and duplicate deliveries never create a second report, even under race conditions. |
-| `lat`/`lon` required from the app, optional from email | The app always has GPS; email often doesn't. |
-| Status texts are not in the API | The app localizes; the backend speaks codes. |
-| No agent logic in the gateway | The gateway stays small, fast and testable; agents can be rebuilt without touching channels. |
-
-## Next steps
-
-1. Agree on this contract with the app (fields, error codes, status values).
-2. Supabase project in an EU region; buckets and keys as above.
-3. First end-to-end test: real report from the app → row in Supabase.
-4. Real mailbox for the email channel; second end-to-end test.
-5. Endpoints for "approve per click": `GET /v1/reports/{id}/draft`, `POST /v1/reports/{id}/decision`.
-6. Retention job for the raw bucket; Alembic migrations; rate limiting per device.
+- TODO: Email channel: needs a rule for reports without a position, a way for the sender to approve, and an answer by email. The first version (IMAP poller, parser) is in the git history (commit 8962c4f).
+- TODO: Partner apps and Open311 as further channels.
+- TODO: The app waits for the whole chain in one request. Once the app asks for the status by polling, the gateway can answer at once.

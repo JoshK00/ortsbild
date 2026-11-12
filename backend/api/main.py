@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.health import CheckResult, model_checks, run_checks
 from api.auth import create_auth_router, make_current_user
+from api.gateway import create_gateway_router
 from api.public import create_public_router
 from api.reports import Services, create_reports_router
 from logging_config import setup_logging
@@ -104,6 +105,7 @@ def create_app(
     api_key: str | None = None,
     configure_logging: bool = True,
     reports_per_hour: int | None = None,
+    gateway_key: str | None = None,
     demo_reporters: list[str] | None = None,
     tiles_dir: Path | None = None,
 ) -> FastAPI:
@@ -113,6 +115,8 @@ def create_app(
     The API key only opens the details of /health, the app signs in with Apple instead.
     `demo_reporters` are the reporter ids whose reports the dashboard shows (without login). Without it the environment
     variable DEMO_REPORTER_IDS is used, a comma separated list. Empty means the dashboard has nothing to show.
+    `gateway_key` is the key the connector gateway shows to hand over its reports (see api/gateway.py). Without it the environment
+    variable GATEWAY_KEY is used, and without that the entrance of the gateway does not exist.
     `tiles_dir` holds the map file of the dashboard (`*.pmtiles`), without it the environment variable TILES_DIR or the folder
     `tiles` next to `backend` is used. A folder that does not exist is simply not served.
     """
@@ -167,6 +171,19 @@ def create_app(
         create_reports_router(
             get_services=lambda: app.state.services,
             current_user=current_user,
+            reports_per_hour=reports_per_hour or int(os.getenv("MAX_REPORTS_PER_HOUR", "20")),
+            tenant=os.getenv("TENANT_ID", "pilot"),
+        )
+    )
+
+    def current_gateway_key() -> str | None:
+        return gateway_key if gateway_key is not None else os.getenv("GATEWAY_KEY")
+
+    app.include_router(
+        create_gateway_router(
+            get_services=lambda: app.state.services,
+            current_user=current_user,
+            get_gateway_key=current_gateway_key,
             reports_per_hour=reports_per_hour or int(os.getenv("MAX_REPORTS_PER_HOUR", "20")),
             tenant=os.getenv("TENANT_ID", "pilot"),
         )

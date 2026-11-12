@@ -1,62 +1,32 @@
-"""Runtime configuration, read from environment variables (prefix ``GATEWAY_``)."""
+"""Settings from the environment. The names are the ones of the backend (backend/.env), so both read the same file."""
 
 from functools import lru_cache
-from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The limits of the app channel, the same as in backend/api/reports.py (POST /v1/reports)
+MAX_PHOTO_BYTES = 15 * 1024 * 1024
+MAX_TEXT_CHARS = 5000
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="GATEWAY_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # --- General -----------------------------------------------------------
-    tenant: str = Field("pilot", description="Tenant (municipality) assigned to incoming reports.")
-    api_keys: list[SecretStr] = Field(
-        default_factory=list,
-        description="Accepted values for the X-API-Key header. Empty list disables the check (local dev only).",
+    # --- Backend -----------------------------------------------------------
+    backend_url: str = Field("http://backend:8000", description="The backend inside the compose network.")
+    gateway_key: SecretStr = Field(
+        description="Shared with the backend (GATEWAY_KEY), opens its entrance for the gateway."
     )
+    # The app waits up to 120 s for its answer (BackendClient.swift). The gateway waits longer, never giving up first.
+    backend_timeout_s: float = 150.0
 
-    # --- Database ----------------------------------------------------------
-    database_url: str = Field(
-        "sqlite:///./gateway.db",
-        description="SQLAlchemy URL. Supabase: postgresql+psycopg://user:pass@host:5432/postgres",
-    )
-
-    # --- Storage -----------------------------------------------------------
-    storage_backend: Literal["local", "s3"] = "local"
-    storage_local_root: str = "./data/storage"
-    storage_bucket_anonymized: str = "reports-anonymized"
-    storage_bucket_raw: str = Field(
-        "reports-raw",
-        description="Private bucket for photos that still need the server-side privacy check.",
-    )
-    s3_endpoint_url: str | None = Field(
-        None, description="S3-compatible endpoint, e.g. https://<project>.supabase.co/storage/v1/s3"
-    )
-    s3_region: str = "eu-central-1"
-    s3_access_key_id: SecretStr | None = None
-    s3_secret_access_key: SecretStr | None = None
-
-    # --- Input limits ------------------------------------------------------
-    max_photo_bytes: int = 15 * 1024 * 1024
-    max_photo_edge_px: int = 2000
-    max_photos_per_report: int = 3
-    max_text_chars: int = 5000
-    max_location_accuracy_m: float = Field(
-        200.0, description="Reports from the app with a worse GPS accuracy are rejected."
-    )
-
-    # --- Email channel (IMAP) ---------------------------------------------
-    imap_host: str | None = None
-    imap_port: int = 993
-    imap_username: str | None = None
-    imap_password: SecretStr | None = None
-    imap_inbox: str = "INBOX"
-    imap_folder_processed: str = "processed"
-    imap_folder_ignored: str = "ignored"
-    imap_folder_failed: str = "failed"
-    imap_poll_interval_s: int = 60
+    # --- Object storage: the raw bucket of the backend -----------------------
+    storage_endpoint_url: str
+    storage_access_key: SecretStr
+    storage_secret_key: SecretStr
+    storage_region: str = "us-east-1"
+    storage_bucket_raw: str
 
 
 @lru_cache

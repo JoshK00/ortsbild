@@ -1,7 +1,7 @@
 [project]
 name = "gateway"
-version = "0.1.0"
-description = "Connector gateway: receives citizen reports from the iOS app and email and stores them in one canonical format."
+version = "0.2.0"
+description = "Connector gateway: takes reports in from a channel and hands them to the backend in its format (IncomingReport)."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -9,14 +9,14 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "python-multipart>=0.0.9",
-    "sqlalchemy>=2.0",
-    "psycopg[binary]>=3.1",
+    "httpx>=0.27",
     "pillow>=10.3",
+    "pillow-heif>=0.16",
     "boto3>=1.34",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27", "moto[s3]>=5", "ruff>=0.5"]
+dev = ["pytest>=8", "moto[s3]>=5", "ruff>=0.5"]
 
 [build-system]
 requires = ["setuptools>=69"]
