@@ -15,10 +15,7 @@ class ResearchProvider(Protocol):
 
 
 class ScriptedResearchProvider:
-    """A stand-in with a fixed answer, for tests and for running the chain without a search provider.
-
-    TODO: It is not an answer for a real place. It exists so that the whole chain can be tried before a search is paid for.
-    """
+    """A test double with a fixed answer. Production has no stand-in: `RESEARCH_PROVIDER=none` runs without research."""
 
     def __init__(self, result: ResearchResult | None) -> None:
         self.result = result

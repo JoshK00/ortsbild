@@ -4,7 +4,7 @@ from pydantic import Field, model_validator
 
 from models.incoming_report import ContractModel
 
-# The fixed MVP list (decision D2). A municipality-specific list is a later step (plan.md 5.9).
+# The fixed MVP list (decision D2). A municipality-specific list is a later step.
 Category = Literal["litter", "graffiti", "street_light", "playground_equipment", "pothole", "tree", "other"]
 Lane = Literal["hazard", "nuisance"]
 

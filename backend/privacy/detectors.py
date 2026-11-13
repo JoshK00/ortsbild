@@ -86,7 +86,6 @@ class Gliner2Detector:
 
     The model is loaded on first use. The first load downloads it from Hugging Face.
     TODO: Check that the model is safe to call from several threads at once.
-    TODO: Ship the model with the container, the server must not download it at startup.
     """
 
     def __init__(self, threshold: float = 0.5):

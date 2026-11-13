@@ -224,7 +224,7 @@ struct BackendReportService: ReportService {
         }
 
         // One request: the server anonymizes, classifies and searches the authority. The app cannot see the single steps.
-        // TODO: Show the single steps once the answer comes by polling (docs/classification-plan.md, C8)
+        // TODO: Show the single steps once the answer comes by polling
         emit(.activity("Daten werden anonymisiert, eingeordnet und die zuständige Stelle wird gesucht"))
         // One id per report: if the answer gets lost and we send again, the server does not create a second report
         let clientReportID = UUID().uuidString

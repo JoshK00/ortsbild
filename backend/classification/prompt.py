@@ -2,7 +2,7 @@ import re
 
 from classification.models import ClassificationInput
 
-# The instructions for a real model. The definitions are decisions D2 to D4 of docs/classification-plan.md.
+# The instructions for a real model. The definitions are decisions D2 to D4 of the classification.
 SYSTEM_PROMPT = """You sort reports of defects in public space (in Germany) for a city.
 You get the text of a report and/or one photo. Answer only with the requested structure.
 

@@ -27,7 +27,7 @@ Who owns the raw photo: until the backend takes the report, the gateway. If the 
 | --- | --- |
 | `gateway/app_channel.py` | The app channel: `POST /v1/reports` |
 | `gateway/photos.py` | Is the upload really a JPEG, PNG or HEIC? |
-| `gateway/raw_store.py` | Writes into the raw bucket of the backend (S3, locally MinIO) |
+| `gateway/raw_store.py` | Writes into the raw bucket of the backend (S3, locally moto) |
 | `gateway/backend.py` | Hands a report to the backend's entrance |
 | `gateway/config.py` | Settings, with the same variable names as the backend |
 | `../../backend/api/gateway.py` | The backend's entrance for the gateway |

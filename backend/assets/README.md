@@ -10,4 +10,4 @@ https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
   Machine Intelligence Research, 20(5), 656-665.
 - Open: the training data is not named in the model README. The accuracy is measured on
   WIDER FACE, whose dataset is listed as CC BY-NC-ND 4.0 (other sources: academic use only).
-  See docs/documentation.md, section 12, before a production use.
+  Check the licence of the training data before a production use.

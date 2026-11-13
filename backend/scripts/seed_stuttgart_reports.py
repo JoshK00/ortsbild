@@ -2,7 +2,7 @@
 
 Every report goes the same way a report from the app goes: photo and text through the privacy layer, classification,
 research of the authority, draft, and then the release ("Freigeben"), so the dashboard shows it. The reports of one place
-are several reports on purpose: the second and third one count as votes (docs/documentation.md, duplicates).
+are several reports on purpose: the second and third one count as votes.
 
 It runs INSIDE the backend container of the server, because it needs the secrets of the server to open a session for its own
 test user (never a real user):

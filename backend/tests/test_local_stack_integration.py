@@ -58,7 +58,7 @@ def test_real_postgres_report_status_round_trip():
 
 
 def test_real_object_storage_round_trip_and_exif_stripping():
-    """Against the real S3 storage (MinIO locally, IONOS later): upload, strip EXIF, check, clean up."""
+    """Against the real S3 storage (moto locally, IONOS later): upload, strip EXIF, check, clean up."""
     store = S3PhotoStore(s3_client_from_env(), s3_buckets_from_env())
     raw_ref, clean_ref = "raw/integration-test/p1.jpg", "clean/integration-test/p1.jpg"
     try:

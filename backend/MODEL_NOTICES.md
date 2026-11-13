@@ -2,7 +2,7 @@
 
 The privacy layer uses three third-party models. None of them was modified by us. This file
 travels with the backend (it is part of the Docker image) so the license duties of the models
-are met if the image is ever handed to someone else. See docs/documentation.md, section 12, for
+are met if the image is ever handed to someone else. Read the next point for
 the review and the open points.
 
 ## GLiNER2-PII (text: names, emails, phone numbers, IBAN, plates)

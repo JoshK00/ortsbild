@@ -33,11 +33,10 @@ HAZARD_WORDS = ("gefahr", "gefährlich", "stolper", "sturz", "gestürzt", "schar
 
 
 class RuleBasedProvider:
-    """A crude stand-in that looks at the words of the text only, the photo is ignored.
+    """The fallback without a model: it looks at the words of the text only, the photo is ignored.
 
-    It lets the whole chain (privacy, classification, storage, app) run and be tested before a real model is
-    chosen. Its confidence is low on purpose, so nobody takes its answers for more than they are.
-    TODO: Replace it with a real provider once the model is chosen (docs/classification-plan.md, C6).
+    It is the default of `CLASSIFICATION_PROVIDER` and what the tests use. Production sets `anthropic` (claude.py).
+    Its confidence is low on purpose, so nobody takes its answers for more than they are.
     """
 
     def classify(self, data: ClassificationInput) -> Classification:

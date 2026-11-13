@@ -1,6 +1,6 @@
 # Ortsbild: Architektur auf einer Seite (Langfassung)
 
-Stand: 11. November 2026. Geschrieben für die Präsentation. Die Kurzfassung (eine Bildschirmseite) liegt als Handout-Seite vor, diese Datei enthält alles in ganzen Sätzen. Quellen sind der Code und die Dokumente [documentation.md](documentation.md), [mvp-plan.md](mvp-plan.md), [plan.md](plan.md) und [dashboard-plan.md](dashboard-plan.md). Kein Rechtsrat.
+Stand: 11. November 2026. Geschrieben für die Präsentation. Die Kurzfassung (eine Bildschirmseite) liegt als Handout-Seite vor, diese Datei enthält alles in ganzen Sätzen. Quelle ist der Code mit seinen Kommentaren. Kein Rechtsrat.
 
 ## Worum es geht
 
@@ -31,7 +31,7 @@ Abzweigungen:
 
 ## Welche Modelle wir nutzen
 
-Alle drei Claude-Aufgaben laufen auf dem kleinen, günstigen Modell. Laut Kommentaren im Code war es auf unserem Testsatz so gut wie die größeren Stufen (die Messdaten dazu stehen im Entscheidungsprotokoll in documentation.md). Jede Aufgabe lässt sich über eine Umgebungsvariable umstellen (`ANTHROPIC_CLASSIFICATION_MODEL`, `ANTHROPIC_RESEARCH_MODEL`, `ANTHROPIC_DRAFT_MODEL`), zum Beispiel auf Sonnet 5.5 für schwierige Orte.
+Alle drei Claude-Aufgaben laufen auf dem kleinen, günstigen Modell. Laut Kommentaren im Code war es auf unserem Testsatz so gut wie die größeren Stufen (die Messung steht als Kommentar in `backend/classification/claude.py`). Jede Aufgabe lässt sich über eine Umgebungsvariable umstellen (`ANTHROPIC_CLASSIFICATION_MODEL`, `ANTHROPIC_RESEARCH_MODEL`, `ANTHROPIC_DRAFT_MODEL`), zum Beispiel auf Sonnet 5.5 für schwierige Orte.
 
 | Modell | Aufgabe | Wo | Besonderheit |
 |---|---|---|---|

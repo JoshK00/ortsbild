@@ -1,6 +1,6 @@
 # Local stack that mimics the hosting: backend, gateway, Caddy, PostgreSQL and an S3-compatible storage.
 # Start: docker compose up --build    (needs backend/.env, see .env.example)
-# TODO: PostGIS image once the duplicate check by location is built.
+# TODO: PostGIS image when the duplicate check by location needs it (backend/cases.py).
 services:
   postgres:
     image: postgres:16-alpine

@@ -25,10 +25,10 @@ class DraftProvider(Protocol):
 
 
 class TemplateDraftProvider:
-    """A fixed German letter, no model. For tests and for running the chain without a model.
+    """A fixed German letter, no model: the default of `DRAFT_PROVIDER` and what the tests use. Production sets `anthropic`.
 
     TODO: It writes German whatever language is asked for, and it does not describe anything beyond the category and the
-    text of the citizen. It is not what the users should get, a model writes the real draft.
+    text of the citizen.
     """
 
     def draft(self, data: DraftInput) -> DraftContent:

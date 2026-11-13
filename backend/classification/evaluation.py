@@ -10,7 +10,7 @@ from classification.models import Classification
 from models.sanitized_report import RedactionLog, SanitizedReport
 from privacy.photo_store import InMemoryPhotoStore
 
-# The targets of docs/classification-plan.md (proposals, confirmed in step C0)
+# The targets of the evaluation (proposals, confirmed in step C0)
 TARGET_CATEGORY_ACCURACY = 0.85
 TARGET_EMERGENCY_RECALL = 1.0
 TARGET_FALSE_ALARM_RATE = 0.10

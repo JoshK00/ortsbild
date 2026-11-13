@@ -43,7 +43,7 @@ class InMemoryPhotoStore:
 
 
 class S3PhotoStore:
-    """Stores the files in an S3-compatible object storage (IONOS, STACKIT, Hetzner, MinIO, ...).
+    """Stores the files in an S3-compatible object storage (IONOS, STACKIT, Hetzner, ...).
 
     The first part of a ref ("raw", "clean") is a logical bucket. `buckets` maps it to the real
     bucket name, because bucket names are unique per provider ("raw" is surely taken).

@@ -5,6 +5,7 @@ build/
 DerivedData/
 .build/
 buildServer.json
+.claude/settings.local.json
 .venv/
 __pycache__/
 .pytest_cache/
@@ -17,7 +18,7 @@ backend/eval/*
 !backend/eval/README.md
 !backend/eval/classification_cases.jsonl
 
-# The map file of the dashboard (hundreds of MB, made with pmtiles extract, see docs/dashboard-plan.md)
+# The map file of the dashboard (hundreds of MB, made with pmtiles extract)
 tiles/
 *.pmtiles
 

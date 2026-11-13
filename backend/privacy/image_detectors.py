@@ -71,7 +71,7 @@ def merge_overlapping(
     ]
 
 
-DEFAULT_FACE_SCORE_THRESHOLD = 0.7  # decided 2026-11-11 after looking at test photos (docs/mvp-plan.md): the faces a person can recognise score 0.85 or more
+DEFAULT_FACE_SCORE_THRESHOLD = 0.7  # decided 2026-11-11 after looking at test photos: the faces a person can recognise score 0.85 or more
 
 
 def face_score_threshold_from_env() -> float:

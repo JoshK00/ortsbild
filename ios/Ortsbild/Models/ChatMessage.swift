@@ -68,7 +68,7 @@ enum DraftAction: CaseIterable {
     case delete
 }
 
-/// Content types of a chat message. They mirror the escalation levels from docs/documentation.md.
+/// Content types of a chat message. They mirror the escalation levels of the flow.
 enum ChatContent {
     case text(String)
     case photo(UIImage, caption: String?)

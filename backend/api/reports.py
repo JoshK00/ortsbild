@@ -295,7 +295,7 @@ def create_reports_router(
     def approve_report(report_id: str = Path(pattern=r"^[0-9a-f]{32}$"), user: AccessClaims = Depends(current_user)) -> JSONResponse:
         """The user releases the report: it is visible in the dashboard from now on and counts as a vote of its case.
 
-        The dashboard replaces the letters to the authorities (docs/documentation.md, 2026-11-10). Releasing twice is fine. A report
+        The dashboard replaces the letters to the authorities (decided 2026-11-10). Releasing twice is fine. A report
         that has no category yet (still processing, waiting for the answer to a question, blocked or rejected) gets 409.
         """
         own_report(report_id, user)  # 404 for a foreign report

@@ -1,5 +1,5 @@
 # Production stack for the Cube: Caddy (HTTPS), the connector gateway, the backend and PostgreSQL.
-# The photos live in the IONOS object storage, so there is no MinIO here.
+# The photos live in the IONOS object storage, so there is no local storage here.
 # Start (on the server, in ~/ortsbild/deploy):
 #   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 # deploy.sh does this for you from your Mac.

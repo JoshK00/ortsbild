@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// The texts of the first and the third safety layer for photos (docs/mvp-plan.md, docs/documentation.md 2026-11-11).
+/// The texts of the first and the third safety layer for photos.
 ///
 /// 1. Before the photo is taken: the user decides what to photograph. 2. The server covers faces (not text, it is the
 /// privacy layer). 3. Before the release: the user checks the photo and is responsible for the content.
