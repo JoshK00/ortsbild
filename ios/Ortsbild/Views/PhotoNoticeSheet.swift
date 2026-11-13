@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-/// The rules for the photo, shown once before the first photo. Short on purpose: three points, one sentence of reason.
+/// The rules for the photo, shown before the photo (see `PrivacyNotice.showEveryTime`). Short on purpose: three points, one sentence of reason.
 struct PhotoNoticeSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -37,10 +37,9 @@ struct PhotoNoticeSheet: View {
                 dismiss()
             } label: {
                 Text(PrivacyNotice.sheetButton)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(PrimaryButtonStyle())
         }
         .padding(24)
         .presentationDetents([.medium, .large])
