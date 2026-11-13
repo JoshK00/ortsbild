@@ -29,14 +29,24 @@ struct PrivacyNoticeTests {
         #expect(PrivacyNotice.sheetPoints.allSatisfy { $0.text.count < 120 })
     }
 
-    @Test func theSheetOpensOnceAndNotAgainAfterTheButton() throws {
+    @Test func forNowTheSheetOpensBeforeEveryPhoto() throws {
+        #expect(PrivacyNotice.showEveryTime)
         let suite = "PrivacyNoticeTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let gate = PhotoNoticeGate(defaults: defaults)
+        gate.markSeen()
+        #expect(gate.shouldShow)  // still, although the button was pressed before
+    }
+
+    @Test func withoutTheSwitchTheSheetOpensOnceAndNotAgainAfterTheButton() throws {
+        let suite = "PrivacyNoticeTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let gate = PhotoNoticeGate(defaults: defaults, showEveryTime: false)
         #expect(gate.shouldShow)
         gate.markSeen()
         #expect(!gate.shouldShow)
-        #expect(!PhotoNoticeGate(defaults: defaults).shouldShow)
+        #expect(!PhotoNoticeGate(defaults: defaults, showEveryTime: false).shouldShow)
     }
 }

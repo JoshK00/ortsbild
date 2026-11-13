@@ -24,6 +24,10 @@ enum PrivacyNotice {
 
     static let sheetButton = "Verstanden"
 
+    /// For now the sheet opens before every photo, to be on the safe side. Set it to `false` and it opens only the first time
+    /// (see `PhotoNoticeGate`). To be tested with users later.
+    static let showEveryTime = true
+
     /// Under the button "Freigeben" when there is a photo.
     static let releaseWithPhoto = "Mit „Freigeben“ bestätigst du, dass auf dem Foto niemand erkennbar ist und du die Meldung so teilen darfst. Du bist für den Inhalt deiner Meldung verantwortlich."
 
@@ -31,12 +35,14 @@ enum PrivacyNotice {
     static let releaseWithoutPhoto = "Mit „Freigeben“ wird deine Meldung im Dashboard sichtbar. Du bist für den Inhalt deiner Meldung verantwortlich."
 }
 
-/// Remembers that the user has seen the sheet, so it opens only the first time the user presses the camera or the library button.
+/// Decides whether the sheet opens when the user presses the camera or the library button. With `PrivacyNotice.showEveryTime` it
+/// opens every time, without it only the first time (it remembers that the user has seen it).
 struct PhotoNoticeGate {
     static let key = "photoNoticeSeen.v1"
     var defaults: UserDefaults = .standard
+    var showEveryTime: Bool = PrivacyNotice.showEveryTime
 
-    var shouldShow: Bool { !defaults.bool(forKey: Self.key) }
+    var shouldShow: Bool { showEveryTime || !defaults.bool(forKey: Self.key) }
 
     func markSeen() { defaults.set(true, forKey: Self.key) }
 }
