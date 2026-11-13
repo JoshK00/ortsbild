@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// The real services of the app, created once. Previews and tests pass the mocks instead.
+/// The real services of the app, created once. Previews pass the mock of the sign-in (`MockAuthService`) instead.
 enum AppServices {
     static let client = BackendClient(baseURL: AppConfig.backendURL)
     static let auth: AuthService = BackendAuthService(client: client)

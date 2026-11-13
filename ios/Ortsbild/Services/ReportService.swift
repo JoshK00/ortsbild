@@ -22,20 +22,20 @@ enum ReportDeletion: Equatable {
     case failed(message: String)
 }
 
-/// Interface to the backend. `MockReportService` is the scripted stand-in for previews and for the steps the backend does not have yet.
+/// Interface to the backend (`BackendReportService`).
 protocol ReportService {
     /// New user input (photo and/or text). The agent's replies arrive one after another.
     func respond(photo: UIImage?, text: String?) -> AsyncStream<ChatContent>
-    /// The user's answer to a follow-up question (level 2). `reportID` says which report was asked about, `nil` for the scripted mock.
+    /// The user's answer to a follow-up question (level 2). `reportID` says which report was asked about.
     func answer(_ option: String, reportID: String?) -> AsyncStream<ChatContent>
     /// The user describes the problem in their own words, as the answer to the open question of a report.
     /// The server sanitizes the words first, like every text, then it classifies the report again.
     func describe(_ text: String, reportID: String) -> AsyncStream<ChatContent>
-    /// Action on a draft. `reportID` is the report the draft belongs to (`nil` for the scripted mock and for old drafts).
+    /// Action on a draft. `reportID` is the report the draft belongs to (`nil` for old drafts).
     func perform(_ action: DraftAction, reportID: String?) -> AsyncStream<ChatContent>
     /// The user takes the photo away, because a face or a plate can still be seen. The server deletes it for good.
-    /// `reportID` is `nil` for the scripted mock and for old drafts.
+    /// `reportID` is `nil` for old drafts.
     func removePhoto(reportID: String?) async -> PhotoRemoval
-    /// The user deletes the report: the server deletes it with its photo for good. `reportID` is `nil` for the scripted mock and for old drafts.
+    /// The user deletes the report: the server deletes it with its photo for good. `reportID` is `nil` for old drafts.
     func deleteReport(reportID: String?) async -> ReportDeletion
 }

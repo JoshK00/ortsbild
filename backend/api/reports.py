@@ -9,9 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 from PIL import Image, UnidentifiedImageError
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 import privacy.photos  # noqa: F401  (registers the HEIC reader of Pillow)
 from auth.account import delete_account, photo_refs
@@ -19,13 +18,13 @@ from auth.sessions import AuthManager
 from auth.tokens import AccessClaims
 from cases import CASE_OPEN_DAYS, DUPLICATE_RADIUS_M, case_for, case_id_of, votes_of
 from classification.models import CLARIFICATION_CATEGORIES, Classification
+from drafting.service import strip_facts_block
 from models.incoming_report import IncomingReport
 from models.sanitized_report import RedactionLog, SanitizedReport
+from privacy.detectors import TextDetector
 from privacy.photo_store import PhotoStore
 from privacy.pseudonyms import PseudonymStore
-from privacy.detectors import TextDetector
 from privacy.report_status import ReportRecord, ReportStatusStore
-from drafting.service import strip_facts_block
 from privacy.text import sanitize_text
 
 logger = logging.getLogger("ortsbild.api")

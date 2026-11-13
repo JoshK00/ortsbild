@@ -18,14 +18,14 @@ struct ReportDraft {
     let version: Int
     /// How to reach the authority, e.g. "E-Mail: tiefbau@muenchen.de". `nil` if none was found.
     var recipient: String? = nil
-    /// The language of the letter (two letters). `nil` for the scripted drafts of the mock.
+    /// The language of the letter (two letters). `nil` if the server sent none.
     var language: String? = nil
     /// One sentence in German about what the letter says, for a letter in a language the user may not read.
     var summaryDE: String? = nil
     /// The cleaned photo that goes with the letter.
     var photo: UIImage? = nil
-    /// The report on the server that the draft belongs to, needed to release it. `nil` for the scripted drafts of the mock
-    /// and for drafts that were written by an older version of the app.
+    /// The report on the server that the draft belongs to, needed to release it. `nil` for drafts that were written by an older
+    /// version of the app.
     var reportID: String? = nil
     /// The id the dashboard knows the case by, for the link "Im Dashboard ansehen". `nil` if the server sent none.
     var caseID: String? = nil

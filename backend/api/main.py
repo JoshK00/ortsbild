@@ -166,13 +166,15 @@ def create_app(
         return JSONResponse(status_code=200 if healthy else 503, content=content)
 
     current_user = make_current_user(lambda: app.state.services.auth)
-    app.include_router(create_auth_router(lambda: app.state.services.auth, current_user))
+    per_hour = reports_per_hour or int(os.getenv("MAX_REPORTS_PER_HOUR", "20"))
+    tenant = os.getenv("TENANT_ID", "pilot")
+    app.include_router(create_auth_router(lambda: app.state.services.auth))
     app.include_router(
         create_reports_router(
             get_services=lambda: app.state.services,
             current_user=current_user,
-            reports_per_hour=reports_per_hour or int(os.getenv("MAX_REPORTS_PER_HOUR", "20")),
-            tenant=os.getenv("TENANT_ID", "pilot"),
+            reports_per_hour=per_hour,
+            tenant=tenant,
         )
     )
 
@@ -184,8 +186,8 @@ def create_app(
             get_services=lambda: app.state.services,
             current_user=current_user,
             get_gateway_key=current_gateway_key,
-            reports_per_hour=reports_per_hour or int(os.getenv("MAX_REPORTS_PER_HOUR", "20")),
-            tenant=os.getenv("TENANT_ID", "pilot"),
+            reports_per_hour=per_hour,
+            tenant=tenant,
         )
     )
 

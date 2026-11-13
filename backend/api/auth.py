@@ -49,7 +49,7 @@ def make_current_user(get_auth: Callable[[], AuthManager]) -> Callable[..., Acce
     return current_user
 
 
-def create_auth_router(get_auth: Callable[[], AuthManager], current_user: Callable[..., AccessClaims]) -> APIRouter:
+def create_auth_router(get_auth: Callable[[], AuthManager]) -> APIRouter:
     """Sign in with Apple, refresh, logout. The app never sends a password or an API key."""
     router = APIRouter(prefix="/v1/auth")
 

@@ -167,9 +167,5 @@ struct ReportDeletionTests {
         #expect(await service.deleteReport(reportID: nil) == .failed(message: BackendReportService.noReportForDeletion))
     }
 
-    @Test func theScriptedPrototypeDeletesWithoutAServer() async {
-        #expect(await MockReportService().deleteReport(reportID: nil) == .deleted)
-    }
-
     private enum TestError: Error { case notFailed }
 }
