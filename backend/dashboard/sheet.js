@@ -3,10 +3,9 @@
 (function (root) {
   "use strict";
 
-  var PEEK_HEIGHT = 188; // handle, title, count and the first report
+  var PEEK_HEIGHT = 188; // handle, count and the first report
   var FLING_MS = 180; // how far ahead a moving finger is followed: height + speed * this
   var TAP_PX = 6; // a touch that moves less than this is a tap, not a drag
-  var TAP_MS = 400;
   var MIN_STEP = 60; // two stops are at least this far apart, also on a small screen (a phone on its side)
 
   // The three stops of the list in pixels, for a window of `viewport` pixels height. `topInset` is what stays free above the
@@ -58,7 +57,7 @@
   }
 
   var api = {
-    PEEK_HEIGHT: PEEK_HEIGHT, TAP_PX: TAP_PX, TAP_MS: TAP_MS,
+    TAP_PX: TAP_PX,
     snapPoints: snapPoints, stops: stops, clamp: clamp, nearest: nearest, velocityOf: velocityOf, next: next,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

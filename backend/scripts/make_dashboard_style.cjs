@@ -1,4 +1,4 @@
-// Write the style of the dashboard map: dashboard/map/style.json (dark Protomaps basemap, German labels).
+// Write the style of the dashboard map: dashboard/map/style_luftbild.json (aerial photos with the names of the Protomaps basemap, German labels).
 //
 // The style is made from the open source package @protomaps/basemaps (BSD-3). Run it with node, from the repo root:
 //   npm pack @protomaps/basemaps@5.7.2 && mkdir -p /tmp/basemaps && tar -xzf protomaps-basemaps-5.7.2.tgz -C /tmp/basemaps
@@ -60,11 +60,7 @@ const style = {
   layers: styleLayers,
 };
 
-const target = path.join(__dirname, "..", "dashboard", "map", "style.json");
-fs.writeFileSync(target, JSON.stringify(style));
-console.log(`wrote ${styleLayers.length} layers to ${target}`);
-
-// The same map as an aerial photo (tiles/stuttgart_luftbild.pmtiles, made by build_aerial_tiles.py): the photo is the ground,
+// The map of the dashboard as an aerial photo (tiles/stuttgart_luftbild.pmtiles, made by build_aerial_tiles.py): the photo is the ground,
 // only the names of the places, streets and waters of the vector map lie above it. The photo is a little darker, so the markers stand out.
 const LABELS = ["places_subplace", "places_locality", "roads_labels_major", "roads_labels_minor", "water_label_lakes", "water_waterway_label"];
 const aerial = {

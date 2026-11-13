@@ -14,7 +14,7 @@
 <body>
 <div id="map" aria-label="Karte der Meldungen"></div>
 <div class="map-vignette" aria-hidden="true"></div>
-<!-- measures the safe areas of the phone (notch, home bar), see readInsets() in app.js -->
+<!-- measures the safe areas of the phone (notch, home bar), see insets() in app.js -->
 <div id="insets" aria-hidden="true"></div>
 <!-- tells screen readers what changed in the list -->
 <p id="announce" class="sr-only" role="status"></p>
@@ -51,29 +51,12 @@
     <p id="banner" class="glass pill banner" hidden></p>
   </div>
 
-  <svg class="compass" viewBox="0 0 100 100" aria-hidden="true">
-    <circle cx="50" cy="50" r="44" class="ring"/>
-    <circle cx="50" cy="50" r="30" class="ring thin"/>
-    <path d="M50 6v8M50 86v8M6 50h8M86 50h8" class="tick"/>
-    <path d="M50 22l5 28h-10z" class="needle"/>
-    <path d="M50 78l5-28h-10z" class="needle dim"/>
-    <text x="50" y="21" class="north" text-anchor="middle">N</text>
-  </svg>
-
   <section id="detail" class="glass panel detail" role="dialog" aria-modal="false" aria-label="Details der Meldung" data-snap="half" hidden>
     <button type="button" id="detail-handle" class="sheet-handle" aria-controls="detail-body" aria-expanded="false" aria-label="Die ganze Meldung zeigen"><span class="grip"></span></button>
     <div id="detail-body" class="detail-body"></div>
   </section>
 
-  <div class="bottom-left">
-    <p id="place" class="place"><span class="dot-white"></span><span id="place-name">Keine Meldungen</span></p>
-    <p class="readout" aria-label="Kartenmitte"><span id="read-lat">0,000° N</span><span id="read-lon">0,000° O</span></p>
-  </div>
-
   <div class="bottom-right">
-    <button type="button" id="minimap-button" class="glass minimap-box" aria-label="Alle Meldungen zeigen">
-      <span id="minimap"></span>
-    </button>
     <div class="controls">
       <button type="button" id="zoom-in" class="glass icon-button zoom" aria-label="Vergrößern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       <button type="button" id="zoom-out" class="glass icon-button zoom" aria-label="Verkleinern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>

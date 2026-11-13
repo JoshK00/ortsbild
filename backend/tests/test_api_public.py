@@ -222,12 +222,12 @@ def test_without_a_map_folder_nothing_is_served_and_the_app_still_starts(tmp_pat
 def test_the_style_and_the_map_files_come_with_the_page():
     """Everything the map needs is ours: the style, the fonts, the symbols. The style names no other server."""
     with Env() as env:
-        style = env.client.get("/dashboard/map/style.json").text
+        style = env.client.get("/dashboard/map/style_luftbild.json").text
         font = env.client.get("/dashboard/map/fonts/Noto%20Sans%20Regular/0-255.pbf")
         sprite = env.client.get("/dashboard/map/sprites/dark.json")
     assert font.status_code == 200 and sprite.status_code == 200
     assert "http" not in style.replace("https://www.openstreetmap.org/copyright", "")  # only the link of the attribution
-    assert style.count("__ORIGIN__") == 3  # tiles, fonts, symbols: all from the address of the page
+    assert style.count("__ORIGIN__") == 4  # the names, the aerial photos, the fonts, the symbols: all from the address of the page
 
 
 # ---------------------------------------------------------------------------

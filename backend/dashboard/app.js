@@ -11,10 +11,9 @@
   };
   var STATUS_NAMES = { received: "Eingegangen", in_progress: "In Bearbeitung", done: "Erledigt" };
   var TIER_NAMES = { high: "Hoch", medium: "Mittel", low: "Niedrig", done: "Erledigt" };
-  var TIER_COLORS = { high: "--high", medium: "--medium", low: "--low", done: "--done" };
-  // The map is a vector map of the region around Stuttgart. Tiles, fonts and symbols all come from our own server, so
-  // no visitor sends an address or a map section to a third party (see docs/dashboard-plan.md).
-  var STYLE_URL = "map/style_luftbild.json"; // the aerial photo; map/style.json is the dark vector map
+  // The map is the aerial photo map of Stuttgart. Tiles, fonts and symbols all come from our own server, so
+  // no visitor sends an address or a map section to a third party .
+  var STYLE_URL = "map/style_luftbild.json"; // the aerial photo, the names lie above it (made by scripts/make_dashboard_style.cjs)
   var START_VIEW = { center: [48.7758, 9.1829], zoom: 13 };
   var MAP_BOUNDS = [[48.685, 9.03], [48.87, 9.325]]; // the city: the aerial photo (and nothing outside) is in the map file
   var ATTRIBUTION = "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors";
@@ -33,7 +32,6 @@
   var state = {
     cases: [],
     selected: null,
-    live: true,
     firstFit: true,
     loading: true, // the first answer of the server is on its way
     error: false, // it did not come
@@ -44,7 +42,7 @@
     hiddenTiers: {},
     filterOpen: false,
   };
-  var map, mini, miniFrame, markerLayer, markers = {};
+  var map, markerLayer, markers = {};
   var detailShownFor = null, opener = null, lastAnnouncement = "";
 
   function el(tag, className, text) {
@@ -146,7 +144,6 @@
   }
 
   function useLive(cases) {
-    state.live = true;
     state.loading = false;
     state.error = false;
     state.cases = cases;
@@ -156,7 +153,7 @@
   }
 
   function failed() {
-    if (state.cases.length > 0 && state.live) {
+    if (state.cases.length > 0) {
       // the last reports stay on the screen, the mode says that they may be old
       setMode("Live: keine Verbindung", "warn", "Der Server hat nicht geantwortet. Angezeigt werden die zuletzt geladenen Meldungen.");
       return;
@@ -191,18 +188,6 @@
     });
   }
 
-  // The town that most reports are in, from the last part of the address ("48143 Münster" gives "Münster")
-  function townOf(cases) {
-    var counts = {};
-    cases.forEach(function (report) {
-      var parts = String(report.address || "").split(",");
-      var town = parts[parts.length - 1].trim().replace(/^\d+\s*/, "");
-      if (town) counts[town] = (counts[town] || 0) + 1;
-    });
-    var best = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })[0];
-    return best || "Keine Meldungen";
-  }
-
   // ---------------------------------------------------------------- render
 
   function render() {
@@ -215,7 +200,6 @@
     renderDetail();
     renderEmpty(items);
     renderSummary(items.length);
-    byId("place-name").textContent = townOf(state.cases);
   }
 
   // "4 Fälle" (a case is what the list shows: one defect with all its reports). Also said to screen readers when it changes.
@@ -318,7 +302,6 @@
       row.setAttribute("aria-pressed", String(state.selected === report.id));
       row.appendChild(photoFrame(report, "thumb"));
       var main = el("span", "row-main");
-      main.appendChild(badge(report.category, item.tier));
       main.appendChild(el("span", "title", categoryName(report.category)));
       main.appendChild(countPill(report));
       var meta = el("span", "meta");
@@ -354,10 +337,6 @@
       var name = categoryName(report.category) + ", Priorität " + TIER_NAMES[item.tier].toLowerCase();
       var area = el("span", "marker-hit");
       area.appendChild(badge(report.category, item.tier, "marker-badge" + (selected ? " selected" : "")));
-      var label = el("span", "marker-label"); // a small label under the badge: the votes of the case
-      label.appendChild(Icons.ui("people"));
-      label.appendChild(el("span", null, String(Math.max(1, report.reports_count || 1))));
-      area.appendChild(label);
       area.appendChild(el("span", "sr-only", name)); // the name of the button for a screen reader
       var marker = L.marker([report.lat, report.lon], {
         icon: L.divIcon({ html: area, className: "marker-wrap", iconSize: [hit, hit], iconAnchor: [hit / 2, hit / 2] }),
@@ -662,20 +641,6 @@
     });
   }
 
-  function degrees(value, positive, negative) {
-    return Math.abs(value).toFixed(3).replace(".", ",") + "° " + (value >= 0 ? positive : negative);
-  }
-
-  function updateReadout() {
-    var center = map.getCenter();
-    byId("read-lat").textContent = degrees(center.lat, "N", "S");
-    byId("read-lon").textContent = degrees(center.lng, "O", "W");
-    // the small map shows the same place from further away, with a frame around what the big map shows
-    if (!mini) return; // there is no overview map on a phone
-    mini.setView(center, Math.max(map.getZoom() - 4, 1), { animate: false });
-    miniFrame.setBounds(map.getBounds());
-  }
-
   // ---------------------------------------------------------------- search
   // One field for places and addresses. It lists the reports that match first (found in the data that is already loaded), then
   // the places and addresses that OUR server finds (/v1/public/search), so the browser never calls a third party.
@@ -950,35 +915,17 @@
     markerLayer = L.layerGroup().addTo(map);
     searchLayer = L.layerGroup().addTo(map);
 
-    // The overview map is a second WebGL map: only where it is shown (not on a phone)
-    var overview = null;
-    if (!isPhone()) {
-      mini = L.map("minimap", {
-        zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
-        boxZoom: false, keyboard: false, touchZoom: false,
-      }).setView(START_VIEW.center, START_VIEW.zoom - 4);
-      miniFrame = L.rectangle(map.getBounds(), { color: "#ffffff", weight: 1.5, fillOpacity: 0.1, interactive: false }).addTo(mini);
-    }
     loadStyle().then(function (style) {
       addVectorMap(map, style);
-      if (mini) {
-        // the overview map has no labels and no symbols, at that size they only get in the way
-        overview = JSON.parse(JSON.stringify(style));
-        overview.layers = overview.layers.filter(function (layer) { return layer.type !== "symbol"; });
-        addVectorMap(mini, overview);
-      }
     }).catch(function () {
       // No map under the markers is better than a map from somebody else: there is no fallback to a public server
       setMode("Karte fehlt", "warn", "Die Karte konnte nicht gestartet werden (der Browser braucht WebGL, und die Kartendatei muss auf dem Server liegen). Die Meldungen werden ohne Karte gezeigt.");
     });
-    map.on("move zoom", updateReadout);
-    updateReadout();
 
     initSearch();
     byId("zoom-in").addEventListener("click", function () { map.zoomIn(); });
     byId("zoom-out").addEventListener("click", function () { map.zoomOut(); });
     byId("fit-all").addEventListener("click", function () { fitAll(true); });
-    byId("minimap-button").addEventListener("click", function () { fitAll(true); });
     attachHandle(byId("list-handle"), "list");
     attachHandle(byId("detail-handle"), "detail");
     document.addEventListener("click", function (event) {
@@ -998,7 +945,7 @@
     render();
 
     refresh();
-    setInterval(function () { if (state.live && !state.error) refresh(); }, REFRESH_MS);
+    setInterval(function () { if (!state.error) refresh(); }, REFRESH_MS);
   }
 
   start();
