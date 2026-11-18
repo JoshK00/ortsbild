@@ -123,8 +123,9 @@ def build_report_graph(
 ):
     """The orchestrator: the stages of one report, in order.
 
-    TODO: Add the next stages, each as one more node with a router in front of it: the duplicate check (before the
-    research), the policy code, the approval pause (a LangGraph interrupt) and the sending.
+    The duplicate check (cases.py, worked out for the dashboard) and the approval (endpoint /approve) live outside this
+    graph, and the dashboard replaces the sending of single letters.
+    TODO: Decide whether the policy code is still planned, then as one more node with a router in front of it.
     """
     graph = StateGraph(ReportState)
     graph.add_node("privacy", make_privacy_node(privacy_graph, status_store))

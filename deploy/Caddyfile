@@ -2,7 +2,7 @@
 {$SITE_ADDRESS::80} {
 	encode gzip
 
-	# Photos are uploaded through here. TODO: lower the limit once the real size is known.
+	# Photos are uploaded through here. TODO: lower the limit to about 16MB, the backend allows 15 MB per photo (MAX_PHOTO_BYTES).
 	request_body {
 		max_size 25MB
 	}
@@ -22,7 +22,6 @@
 	}
 
 	# Everything else of the app and the dashboard goes straight to the backend.
-	# TODO: /health shows the names of our checks. Restrict it before real operation.
 	handle {
 		reverse_proxy backend:8000
 	}

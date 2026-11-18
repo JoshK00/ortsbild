@@ -44,7 +44,6 @@ class Location(ContractModel):
     # TODO: Decide whether origin is required or can be dropped. The privacy layer no
     #       longer uses it, the location is passed on unchanged.
     origin: Literal["device_gps", "exif", "geocoded_from_text"] | None = None
-    # TODO: Decide whether the place is also kept as text (address_text) next to lat/lon.
 
 
 class Photo(ContractModel):
@@ -56,7 +55,8 @@ class Photo(ContractModel):
     id: str = Field(min_length=1)
     mime_type: str = Field(pattern=r"^image/[\w.+-]+$")
     ref: str = Field(min_length=1)  # pointer to the stored file
-    # TODO: Add limits (file size, number of photos) once the gateway rules are decided.
+    # The file size is limited in the app channel and the backend (MAX_PHOTO_BYTES, 15 MB).
+    # TODO: Limit the number of photos per report (see also models/gateway_submission.py).
 
 
 class Source(ContractModel):

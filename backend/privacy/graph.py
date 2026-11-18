@@ -58,7 +58,6 @@ def blocked(step: str, error: Exception, report_id: str) -> dict:
     """Fail closed: block the report and log it.
 
     Only the error type is kept and logged, its message (and the traceback) could hold raw data.
-    TODO: Also store the blocked status with its reason durably (database) so an operator finds it.
     """
     logger.error("privacy step blocked a report: report_id=%s step=%s error=%s", report_id, step, type(error).__name__)
     return {"status": "blocked_privacy", "block_reason": f"{step}: {type(error).__name__}"}
