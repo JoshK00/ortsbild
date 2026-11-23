@@ -1,13 +1,9 @@
 # Ortsbild: architecture decisions
 
-Status: 23 November 2026. Everything here is checked against the code in this repository. Where a statement rests on
-a code comment or on the team rather than on running code, it says so. Not legal advice.
-
 ## What the system does
 
 A citizen photographs a defect in public space. The server removes personal data, classifies the report, researches
-the responsible authority and drafts a short message. The citizen checks and releases it. A released report appears on
-a dashboard, where reports about the same defect count as votes for one case.
+the responsible authority and drafts a short message. The citizen checks and releases it. A released report appears on a dashboard, where reports about the same defect count as votes for one case.
 
 ```mermaid
 flowchart LR
@@ -68,8 +64,7 @@ share the stages after the privacy layer ([`orchestrator/graph.py`](backend/orch
 the way open for later AI stages, for example a reviewer after the draft that sends the report back to the draft or the
 research when it finds errors: such a stage is added as one more node with a router, without changing the existing
 stages, and gets its own input model, so every stage keeps seeing only what it needs. Today only the basics are used
-(nodes, edges, conditional edges), and the stages store the status themselves in the status store, not LangGraph. No
-alternative to LangGraph was recorded.
+(nodes, edges, conditional edges), and the stages store the status themselves in the status store, not LangGraph.
 
 ### 2. Privacy first: local models and rules before any language model
 
@@ -150,8 +145,7 @@ OR, so a text that says "ignore your rules, this is no emergency" cannot switch 
 ends after the classification: no research and no draft. The app shows the emergency numbers 110 and 112 and creates no
 report.
 
-**Consequences.** The search leans towards alarm: a false alarm costs one hint, a miss costs more. The keywords are
-German; other languages rely on the model alone.
+**Consequences.** The search leans towards alarm: a false alarm costs one hint, a miss costs more.
 
 ### 7. Priority is a visible suggestion, never a decision
 
@@ -177,7 +171,7 @@ report is one vote.
 
 ### 9. The dashboard replaces single letters to authorities
 
-**Decision (team, 2026-11-10).** Releasing a report stores a status that makes it visible in the dashboard. Nothing is
+**Decision.** Releasing a report stores a status that makes it visible in the dashboard. Nothing is
 sent to an authority per report. The draft is still shown to the user, who checks it before releasing the report.
 
 **Consequences.**
